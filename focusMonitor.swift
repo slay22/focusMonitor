@@ -1,11 +1,17 @@
 import AppKit
 import AVFoundation
+import IOKit.ps
 import SwiftUI
 import Vision
 
 // Settings (UserDefaults, edited in the Settings window): "dwell", "typingGrace", "camera", "enabled".
 let defaults = UserDefaults.standard
-let sampleInterval: TimeInterval = 0.1 // ~10 face detections/s, plenty for head turns
+/// Face detections per second: 10, or 5 on battery / Low Power Mode. Measured on an M-series Mac with a C920:
+/// ~10 % of one core at 10/s, ~7.5 % at 5/s (+ ~3 % in macOS's USB camera service). Camera is off when paused or single-display.
+func sampleInterval() -> TimeInterval {
+    let source = IOPSGetProvidingPowerSourceType(IOPSCopyPowerSourcesInfo()?.takeRetainedValue())?.takeUnretainedValue() as String?
+    return source == kIOPMBatteryPowerKey || ProcessInfo.processInfo.isLowPowerModeEnabled ? 0.2 : 0.1
+}
 let calibFile = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".focusmonitor.json")
 
 // MARK: - Log (shown in the Settings window)
@@ -45,8 +51,13 @@ func loadProfiles() -> [String: Profile] {
 
 // ponytail: head pose (yaw/pitch), not eye tracking. Works when you turn your head between
 // monitors; eyes-only glances won't register. Upgrade path: eye landmarks from VNDetectFaceLandmarksRequest.
-func nearest(yaw: Double, pitch: Double, _ anchors: [Anchor]) -> CGDirectDisplayID? {
-    anchors.min { hypot($0.yaw - yaw, $0.pitch - pitch) < hypot($1.yaw - yaw, $1.pitch - pitch) }?.display
+/// Nearest calibrated display, or nil when it's too close to call: the nearest must be within
+/// (1 - margin) × the runner-up's distance. margin 0 = plain nearest, 0.3 = clearly facing one screen.
+func nearest(yaw: Double, pitch: Double, _ anchors: [Anchor], margin: Double = 0) -> CGDirectDisplayID? {
+    let ranked = anchors.map { (a: $0, d: hypot($0.yaw - yaw, $0.pitch - pitch)) }.sorted { $0.d < $1.d }
+    guard let best = ranked.first else { return nil }
+    if ranked.count > 1, best.d > (1 - margin) * ranked[1].d { return nil }
+    return best.a.display
 }
 
 /// Fires once per change, after the same display has been nearest for `dwell` seconds straight.
@@ -68,6 +79,8 @@ final class HeadTracker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate 
     private let control = DispatchQueue(label: "camera.control") // start/stopRunning block
     var onPose: (_ yaw: Double, _ pitch: Double) -> Void = { _, _ in } // called on main
     private var last = 0.0
+    private var interval = 0.1, intervalChecked = 0.0
+    private let req = VNDetectFaceRectanglesRequest() // revision 3: continuous yaw/pitch
 
     static var cameras: [AVCaptureDevice] {
         AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera],
@@ -90,7 +103,7 @@ final class HeadTracker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate 
         session.beginConfiguration()
         session.inputs.forEach(session.removeInput)
         session.addInput(input)
-        if session.canSetSessionPreset(.vga640x480) { session.sessionPreset = .vga640x480 }
+        if session.canSetSessionPreset(.vga640x480) { session.sessionPreset = .vga640x480 } // 320x240 measured no cheaper
         session.commitConfiguration()
         log("Camera: \(cam.localizedName)")
         return cam.uniqueID
@@ -104,9 +117,9 @@ final class HeadTracker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate 
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sb: CMSampleBuffer, from connection: AVCaptureConnection) {
         let t = ProcessInfo.processInfo.systemUptime
-        guard t - last >= sampleInterval, let px = CMSampleBufferGetImageBuffer(sb) else { return }
+        if t - intervalChecked > 30 { interval = sampleInterval(); intervalChecked = t } // power source changes rarely
+        guard t - last >= interval, let px = CMSampleBufferGetImageBuffer(sb) else { return }
         last = t
-        let req = VNDetectFaceRectanglesRequest() // revision 3: continuous yaw/pitch
         try? VNImageRequestHandler(cvPixelBuffer: px).perform([req])
         // Biggest face = you, not someone walking behind you.
         guard let face = req.results?.max(by: { $0.boundingBox.width < $1.boundingBox.width }),
@@ -191,6 +204,9 @@ struct SettingsView: View {
     @AppStorage("camera") var camera = ""
     @AppStorage("dwell") var dwell = 0.6
     @AppStorage("typingGrace") var typingGrace = 2.0
+    @AppStorage("mouseGrace") var mouseGrace = 1.0
+    @AppStorage("margin") var margin = 0.3
+    @AppStorage("movePointer") var movePointer = false
     @AppStorage("glow") var glow = true
     @AppStorage("glowColor") var glowColor = ""
     @AppStorage("glowFade") var glowFade = 0.8
@@ -208,6 +224,15 @@ struct SettingsView: View {
                 Slider(value: $dwell, in: 0.2...2, step: 0.1)
                 Text(String(format: "%.1f s", dwell)).monospacedDigit().frame(width: 44)
             }
+            LabeledContent("Switch margin") {
+                Slider(value: $margin, in: 0...0.6, step: 0.05)
+                Text("\(Int(margin * 100)) %").monospacedDigit().frame(width: 44)
+            }
+            LabeledContent("Keep focus while using the mouse for") {
+                Slider(value: $mouseGrace, in: 0...5, step: 0.5)
+                Text(mouseGrace == 0 ? "off" : String(format: "%.1f s", mouseGrace)).monospacedDigit().frame(width: 44)
+            }
+            Toggle("Move the mouse pointer to the focused screen", isOn: $movePointer)
             LabeledContent("Pause after typing for") {
                 Slider(value: $typingGrace, in: 0...5, step: 0.5)
                 Text(typingGrace == 0 ? "off" : String(format: "%.1f s", typingGrace)).monospacedDigit().frame(width: 44)
@@ -236,7 +261,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(minWidth: 460, minHeight: 520) // grouped Form has no natural height
+        .frame(minWidth: 500, minHeight: 640) // grouped Form has no natural height
     }
 }
 
@@ -250,6 +275,7 @@ final class App: NSObject, NSApplicationDelegate {
     var setupChange: DispatchWorkItem?
     let watching = NSMenuItem(title: "Watching: –", action: nil, keyEquivalent: "")
     var glow: NSWindow?
+    var pointerSpots: [CGDirectDisplayID: CGPoint] = [:]
     var deb = Debouncer()
     var settingsWindow: NSWindow?
     // Calibration in progress: screens still to do, results so far, current screen's samples.
@@ -371,10 +397,29 @@ final class App: NSObject, NSApplicationDelegate {
             deb.candidate = nil
             return
         }
-        guard let d = nearest(yaw: yaw, pitch: pitch, profile?.anchors ?? []),
-              let target = deb.feed(d, at: ProcessInfo.processInfo.systemUptime, dwell: defaults.double(forKey: "dwell"))
-        else { return }
+        // Head between two screens: undecided, the dwell starts over once it's clear again.
+        guard let d = nearest(yaw: yaw, pitch: pitch, profile?.anchors ?? [], margin: defaults.double(forKey: "margin")) else {
+            deb.candidate = nil
+            return
+        }
+        // Using the mouse on one screen: don't take focus away from that screen.
+        let pointer = CGEvent(source: nil)?.location ?? .zero
+        let pointerDisplay = screens().map(\.id).first { CGDisplayBounds($0).contains(pointer) }
+        let mouseIdle = [CGEventType.mouseMoved, .leftMouseDragged, .rightMouseDragged, .leftMouseDown, .rightMouseDown, .scrollWheel]
+            .map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min()!
+        if mouseIdle < defaults.double(forKey: "mouseGrace"), pointerDisplay != d {
+            deb.candidate = nil
+            return
+        }
+        guard let target = deb.feed(d, at: ProcessInfo.processInfo.systemUptime, dwell: defaults.double(forKey: "dwell")) else { return }
         focusFrontWindow(on: target)
+        if defaults.bool(forKey: "movePointer"), let from = pointerDisplay, from != target {
+            // Leave the pointer where it was on each screen, and bring it back there on return.
+            pointerSpots[from] = pointer
+            let b = CGDisplayBounds(target)
+            CGWarpMouseCursorPosition(pointerSpots[target] ?? CGPoint(x: b.midX, y: b.midY))
+            CGAssociateMouseAndMouseCursorPosition(1) // no input freeze after the warp
+        }
         guard let screen = screens().first(where: { $0.id == target })?.screen else { return }
         watching.title = "Watching: " + screen.localizedName
         if defaults.bool(forKey: "glow") { glow(screen) }
@@ -465,6 +510,10 @@ func selftest() {
     precondition(nearest(yaw: -0.4, pitch: 0.1, a) == 1)
     precondition(nearest(yaw: 0.6, pitch: 0, a) == 2)
     precondition(nearest(yaw: 0, pitch: 0.3, a) == 3)
+    precondition(nearest(yaw: 0, pitch: 0, a, margin: 0.3) == nil)       // between all three: undecided
+    precondition(nearest(yaw: 0, pitch: 0, a) == 3)                      // ...but plain nearest picks 3
+    precondition(nearest(yaw: 0.45, pitch: 0, a, margin: 0.3) == 2)      // clearly 2
+    precondition(nearest(yaw: 0.9, pitch: 0, [a[1]], margin: 0.3) == 2)  // single anchor always wins
     precondition(setupKey([3, 1, 2]) == setupKey([2, 3, 1]))
     precondition(string(from: color(from: "1.0 0.5 0.0 0.75")) == "1.0 0.5 0.0 0.75") // color survives storage
     let dwell = 0.6
@@ -480,7 +529,8 @@ func selftest() {
 }
 
 if CommandLine.arguments.contains("selftest") { selftest(); exit(0) }
-defaults.register(defaults: ["dwell": 0.6, "typingGrace": 2.0, "enabled": true, "glow": true, "glowColor": "0.2 0.78 0.35 0.8", "glowFade": 0.8])
+defaults.register(defaults: ["dwell": 0.6, "typingGrace": 2.0, "enabled": true, "glow": true, "glowColor": "0.2 0.78 0.35 0.8", "glowFade": 0.8,
+                                    "margin": 0.3, "mouseGrace": 1.0, "movePointer": false])
 let delegate = App()
 NSApplication.shared.delegate = delegate
 NSApplication.shared.run()

@@ -25,7 +25,7 @@ macOS menu bar app (Swift, AppKit + SwiftUI + Vision). Webcam head pose → whic
 - Profiles are keyed by the sorted set of connected `CGDirectDisplayID`s (stable per monitor: vendor/model/serial).
   `~/.focusmonitor.json` is `[setupKey: Profile]`. `loadProfiles()` still reads the old `[Anchor]` format.
 - Overlay windows (glow, calibration panel) must not be at window layer 0, or `focusFrontWindow` would pick them.
-- Settings live in `UserDefaults` (`local.focusMonitor`): `enabled`, `dwell`, `typingGrace`, `camera`, `glow`,
+- Settings live in `UserDefaults` (`local.focusMonitor`): `enabled`, `dwell`, `typingGrace`, `mouseGrace`, `margin`, `movePointer`, `camera`, `glow`,
   `glowColor` ("r g b a" sRGB), `glowFade`. Defaults are registered at the bottom of `focusMonitor.swift`.
 
 ## Style

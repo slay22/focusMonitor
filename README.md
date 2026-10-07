@@ -11,7 +11,10 @@ editor on the right, and keep typing. No click or Cmd-Tab needed.
 - **Head tracking** with Apple's Vision framework, all on-device. Video never leaves your Mac.
 - **Window-level focus**: only the window on the watched screen comes forward. Other windows of the
   same app on other screens stay where they are.
-- **Typing guard**: glancing at another screen while typing doesn't steal focus.
+- **Typing & mouse guards**: glancing at another screen while typing, or while using the mouse, doesn't steal focus.
+- **Switch margin**: with your head between two screens, nothing switches until it's clear which one you face.
+- **Pointer follows** (optional): the mouse pointer jumps to where it was on the newly focused screen.
+- **Battery aware**: analyzes half as often on battery or in Low Power Mode.
 - **Profiles per monitor setup** (home, office, …). Each set of connected monitors gets its own
   calibration and camera, and the right profile is picked automatically when you plug in.
 - **Auto-pause** (camera off) when only one display is connected, e.g. laptop-only in a meeting.
