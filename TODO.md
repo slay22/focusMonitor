@@ -35,6 +35,10 @@ Ideas, roughly in priority order within each section. ⭐ = high value for littl
 - [x] **Stable code signing** (self-signed certificate + script) so the Accessibility grant survives rebuilds.
 - [x] **Launch at login** toggle (`SMAppService.mainApp.register()`).
 - [x] **Permission status in Settings** (Camera / Accessibility ✓/✗) + "Open Accessibility Settings…" button.
+- [ ] **"Why didn't it switch?" button** (Foundation Models, macOS 26, needs Apple Intelligence on): the on-device
+  model reads the log, settings and calibration angles (tool calling for the live pose) and explains in plain words,
+  e.g. typing guard held focus, or two screens look alike to the camera. Optional; check `@Generable` macros build with plain `swiftc`.
+  Weaker ideas: app-rule suggestions from running apps; typed commands ("pause for an hour"), better as a Shortcuts action.
 - [ ] **Configurable pause hotkey** (now fixed at ⌃⌥⌘P).
 - [ ] **Profile management** in Settings: list, rename, delete, recalibrate a profile.
 - [x] **Flash effects**: Fade, Pulse, Ripple, Orbit, Dissolve, Explode, Splash, Fireworks, Random.
