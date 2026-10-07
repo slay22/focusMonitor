@@ -22,12 +22,15 @@ macOS menu bar app (Swift, AppKit + SwiftUI + Vision). Webcam head pose → whic
 - **Window activation uses private SkyLight `_SLPSSetFrontProcessWithOptions`** (like yabai/AltTab), loaded via `dlsym`.
   Public alternatives were tried and fail: `kAXFrontmostAttribute` brings *all* the app's windows forward (Cmd-Tab
   behavior), and `NSRunningApplication.activate()` is refused for background processes. `GetProcessForPID` is bound
-  with `@_silgen_name` because Swift hides it as deprecated.
+  with `@_silgen_name` because Swift hides it as deprecated. The exact AX window is found via private
+  `_AXUIElementGetWindow` (window ID), falling back to frame matching.
+- Video-call pause uses `AVCaptureDevice.isInUseByAnotherApplication` (polled every 3 s). It reads `false` when
+  the other camera user is a process from the same terminal, so test it with a real app (Photo Booth, FaceTime).
 - Head pose, not eye gaze: `VNDetectFaceRectanglesRequest` revision 3 yaw/pitch, nearest calibrated anchor.
 - Profiles are keyed by the sorted set of connected `CGDirectDisplayID`s (stable per monitor: vendor/model/serial).
   `~/.focusmonitor.json` is `[setupKey: Profile]`. `loadProfiles()` still reads the old `[Anchor]` format.
 - Overlay windows (glow, calibration panel) must not be at window layer 0, or `focusFrontWindow` would pick them.
-- Settings live in `UserDefaults` (`local.focusMonitor`): `enabled`, `dwell`, `typingGrace`, `mouseGrace`, `margin`, `movePointer`, `camera`, `glow`,
+- Settings live in `UserDefaults` (`local.focusMonitor`): `enabled`, `pauseInCalls`, `keepFocus` / `neverFocus` (comma-separated bundle IDs), `dwell`, `typingGrace`, `mouseGrace`, `margin`, `movePointer`, `camera`, `glow`,
   `glowColor` ("r g b a" sRGB), `glowFade`. Defaults are registered at the bottom of `focusMonitor.swift`.
 
 ## Style

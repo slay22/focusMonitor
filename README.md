@@ -18,7 +18,9 @@ editor on the right, and keep typing. No click or Cmd-Tab needed.
 - **Battery aware**: analyzes half as often on battery or in Low Power Mode.
 - **Profiles per monitor setup** (home, office, …). Each set of connected monitors gets its own
   calibration and camera, and the right profile is picked automatically when you plug in.
-- **Auto-pause** (camera off) when only one display is connected, e.g. laptop-only in a meeting.
+- **Auto-pause** (camera off) with only one display (laptop-only in a meeting), during video calls,
+  and while the screen is locked or asleep. The camera restarts after sleep and falls back if unplugged.
+- **App rules**: never switch away from some apps (games, presentations), never focus others (dashboards).
 - **Pause / resume** from the menu or with **⌃⌥⌘P** from anywhere.
 - **Focus glow**: a short colored frame on the screen that just got focus (color and fade configurable).
 - **Settings**: live "facing" readout, permission status, launch at login, camera, delays, guards, glow,

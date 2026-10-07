@@ -113,6 +113,7 @@ final class HeadTracker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate 
         let cams = Self.cameras
         guard let cam = cams.first(where: { $0.uniqueID == cameraID }) ?? cams.first,
               let input = try? AVCaptureDeviceInput(device: cam) else { return nil }
+        if (session.inputs.first as? AVCaptureDeviceInput)?.device.uniqueID == cam.uniqueID { return cam.uniqueID }
         session.beginConfiguration()
         session.inputs.forEach(session.removeInput)
         session.addInput(input)
@@ -174,26 +175,39 @@ func activateWindowOnly(pid: pid_t, windowID: UInt32) {
     NSRunningApplication(processIdentifier: pid)?.activate()
 }
 
+@_silgen_name("_AXUIElementGetWindow") // private but stable for years; what yabai/AltTab use
+func axWindowID(_ element: AXUIElement, _ id: UnsafeMutablePointer<CGWindowID>) -> AXError
+
+/// App rule lists ("keepFocus", "neverFocus"): comma-separated bundle IDs in UserDefaults.
+func appRule(_ key: String) -> Set<String> {
+    Set((defaults.string(forKey: key) ?? "").split(separator: ",").map(String.init))
+}
+
 /// Raise + focus the topmost normal window whose center lies on `display`.
 func focusFrontWindow(on display: CGDirectDisplayID) {
     let bounds = CGDisplayBounds(display)
     let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+    let neverFocus = appRule("neverFocus")
     for w in list { // front-to-back order
         guard w[kCGWindowLayer as String] as? Int == 0, (w[kCGWindowAlpha as String] as? Double ?? 0) > 0,
               let bd = w[kCGWindowBounds as String] as? NSDictionary,
               let r = CGRect(dictionaryRepresentation: bd), r.width > 100, r.height > 100,
               bounds.contains(CGPoint(x: r.midX, y: r.midY)),
-              let pid = w[kCGWindowOwnerPID as String] as? pid_t else { continue }
+              let pid = w[kCGWindowOwnerPID as String] as? pid_t,
+              !neverFocus.contains(NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? "") else { continue }
+        let windowID = w[kCGWindowNumber as String] as? CGWindowID ?? 0
 
         // Raise the exact window (an app may have windows on several screens), then activate the app.
         let app = AXUIElementCreateApplication(pid)
         var v: CFTypeRef?
         AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &v)
-        if let win = (v as? [AXUIElement])?.first(where: { axFrame($0) == r }) {
+        let windows = v as? [AXUIElement] ?? []
+        let byID = windows.first { var id: CGWindowID = 0; return axWindowID($0, &id) == .success && id == windowID }
+        if let win = byID ?? windows.first(where: { axFrame($0) == r }) { // frame match only if the private call fails
             AXUIElementPerformAction(win, kAXRaiseAction as CFString)
             AXUIElementSetAttributeValue(win, kAXMainAttribute as CFString, kCFBooleanTrue)
         }
-        activateWindowOnly(pid: pid, windowID: w[kCGWindowNumber as String] as? UInt32 ?? 0)
+        activateWindowOnly(pid: pid, windowID: windowID)
         let screen = screens().first { $0.id == display }?.screen.localizedName ?? "display \(display)"
         log("→ \(w[kCGWindowOwnerName as String] as? String ?? "?") on \(screen)")
         return
@@ -220,6 +234,7 @@ struct SettingsView: View {
     @AppStorage("mouseGrace") var mouseGrace = 1.0
     @AppStorage("margin") var margin = 0.3
     @AppStorage("movePointer") var movePointer = false
+    @AppStorage("pauseInCalls") var pauseInCalls = true
     @AppStorage("glow") var glow = true
     @AppStorage("glowColor") var glowColor = ""
     @AppStorage("glowFade") var glowFade = 0.8
@@ -263,6 +278,7 @@ struct SettingsView: View {
                 Text(mouseGrace == 0 ? "off" : String(format: "%.1f s", mouseGrace)).monospacedDigit().frame(width: 44)
             }
             Toggle("Move the mouse pointer to the focused screen", isOn: $movePointer)
+            Toggle("Pause during video calls (another app uses a camera)", isOn: $pauseInCalls)
             LabeledContent("Pause after typing for") {
                 Slider(value: $typingGrace, in: 0...5, step: 0.5)
                 Text(typingGrace == 0 ? "off" : String(format: "%.1f s", typingGrace)).monospacedDigit().frame(width: 44)
@@ -279,6 +295,10 @@ struct SettingsView: View {
             LabeledContent("Calibration") {
                 Text(screens().map(\.screen.localizedName).joined(separator: " + ")).foregroundStyle(.secondary)
                 Button("Recalibrate…", action: onRecalibrate)
+            }
+            Section("App rules") {
+                AppList("Never switch away from", key: "keepFocus")
+                AppList("Never focus", key: "neverFocus")
             }
             Section("Log") {
                 ScrollView {
@@ -308,6 +328,40 @@ struct SettingsView: View {
     }
 }
 
+/// Editable list of apps, stored as comma-separated bundle IDs (see `appRule`).
+struct AppList: View {
+    let title: String
+    @AppStorage var ids: String
+    init(_ title: String, key: String) {
+        self.title = title
+        _ids = AppStorage(wrappedValue: "", key)
+    }
+    var list: [String] { ids.split(separator: ",").map(String.init) }
+
+    var body: some View {
+        LabeledContent(title) {
+            Menu("Add App") {
+                let running = NSWorkspace.shared.runningApplications
+                    .filter { $0.activationPolicy == .regular && !list.contains($0.bundleIdentifier ?? "") && $0.bundleIdentifier != nil }
+                    .sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
+                ForEach(running, id: \.processIdentifier) { app in
+                    Button(app.localizedName ?? app.bundleIdentifier!) { ids = (list + [app.bundleIdentifier!]).joined(separator: ",") }
+                }
+            }.fixedSize()
+        }
+        ForEach(list, id: \.self) { id in
+            HStack {
+                Text(NSWorkspace.shared.urlForApplication(withBundleIdentifier: id).map { FileManager.default.displayName(atPath: $0.path) } ?? id)
+                    .padding(.leading)
+                Spacer()
+                Button { ids = list.filter { $0 != id }.joined(separator: ",") } label: { Image(systemName: "minus.circle") }
+                    .buttonStyle(.borderless)
+                    .help("Remove")
+            }
+        }
+    }
+}
+
 // MARK: - Menu bar app
 
 final class App: NSObject, NSApplicationDelegate {
@@ -319,6 +373,7 @@ final class App: NSObject, NSApplicationDelegate {
     let watching = NSMenuItem(title: "Watching: –", action: nil, keyEquivalent: "")
     var glow: NSWindow?
     var pointerSpots: [CGDirectDisplayID: CGPoint] = [:]
+    var pausedBy: Set<String> = [] // automatic pauses: "video call", "screen locked", "screen asleep"
     var deb = Debouncer()
     var settingsWindow: NSWindow?
     // Calibration in progress: screens still to do, results so far, current screen's samples.
@@ -356,7 +411,7 @@ final class App: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Quit focusMonitor", action: #selector(NSApplication.terminate), keyEquivalent: "q")
         status.menu = menu
 
-        defaults.set(tracker.use(cameraID: defaults.string(forKey: "camera")), forKey: "camera")
+        pickCamera()
         tracker.onPose = { [unowned self] in pose(yaw: $0, pitch: $1) }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [unowned self] _ in
@@ -366,6 +421,47 @@ final class App: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: setupChange!)
         }
         AVCaptureDevice.requestAccess(for: .video) { _ in DispatchQueue.main.async { self.setupChanged() } }
+
+        // Camera plugged/unplugged: back to the profile's camera, or fall back to another one.
+        for name in [AVCaptureDevice.wasConnectedNotification, AVCaptureDevice.wasDisconnectedNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [unowned self] _ in pickCamera() }
+        }
+        NotificationCenter.default.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: nil, queue: .main) { [unowned self] n in
+            log("Camera error, restarting: \((n.userInfo?[AVCaptureSessionErrorKey] as? Error)?.localizedDescription ?? "?")")
+            restartCamera()
+        }
+        // Lock / display sleep pause tracking; waking from sleep restarts the camera (sessions can stall over sleep).
+        let pauseOn = { [unowned self] (reason: String, on: Bool) in
+            if on { pausedBy.insert(reason) } else { pausedBy.remove(reason) }
+            refresh()
+        }
+        let dnc = DistributedNotificationCenter.default()
+        dnc.addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { _ in pauseOn("screen locked", true) }
+        dnc.addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main) { _ in pauseOn("screen locked", false) }
+        let wnc = NSWorkspace.shared.notificationCenter
+        wnc.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { _ in pauseOn("screen asleep", true) }
+        wnc.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { _ in pauseOn("screen asleep", false) }
+        wnc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [unowned self] _ in restartCamera() }
+        // Video call = some other app has a camera open. Polled: there's no notification for it.
+        Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
+            let inCall = defaults.bool(forKey: "pauseInCalls") && HeadTracker.cameras.contains { $0.isInUseByAnotherApplication }
+            if inCall != self.pausedBy.contains("video call") { pauseOn("video call", inCall) }
+        }
+    }
+
+    /// Use the profile's camera if it's connected, otherwise any camera (and say so).
+    func pickCamera() {
+        let wanted = profile?.camera ?? defaults.string(forKey: "camera")
+        guard let used = tracker.use(cameraID: wanted) else { return log("⚠️ No camera connected") }
+        if let wanted, used != wanted {
+            log("⚠️ The calibrated camera isn't connected, using another one until it's back (calibration may be off).")
+        }
+        defaults.set(used, forKey: "camera")
+    }
+
+    func restartCamera() {
+        tracker.setRunning(false)
+        refresh()
     }
 
     /// Switch to the profile of the connected monitors; calibrate if this setup is new.
@@ -379,9 +475,7 @@ final class App: NSObject, NSApplicationDelegate {
         if screens().count > 1 {
             if let p = profile {
                 log("Setup: \(names)")
-                if let cam = p.camera, cam != defaults.string(forKey: "camera") {
-                    defaults.set(tracker.use(cameraID: cam), forKey: "camera")
-                }
+                if p.camera != defaults.string(forKey: "camera") { pickCamera() }
             } else {
                 log("New setup: \(names), calibrating")
                 recalibrate()
@@ -392,13 +486,14 @@ final class App: NSObject, NSApplicationDelegate {
 
     func refresh() {
         let on = defaults.bool(forKey: "enabled")
-        let tracking = on && screens().count > 1 // laptop alone (e.g. in a meeting): nothing to switch between
+        let single = screens().count < 2 // laptop alone (e.g. in a meeting): nothing to switch between
+        let tracking = on && !single && pausedBy.isEmpty
         // Green while the camera is on (like macOS's camera indicator); plain template icon when paused.
         let icon = NSImage(systemSymbolName: tracking ? "eye.fill" : "eye.slash", accessibilityDescription: "focusMonitor")
         let green = icon?.withSymbolConfiguration(.init(paletteColors: [.systemGreen]))
         green?.isTemplate = false // template images get drawn monochrome by the menu bar
         status.button?.image = tracking ? green : icon
-        let state = tracking ? "tracking" : on ? "paused, single display" : "paused"
+        let state = tracking ? "tracking" : !on ? "paused" : single ? "paused, single display" : "paused, " + pausedBy.sorted().joined(separator: ", ")
         if status.button?.toolTip != "focusMonitor: " + state { log("Status: " + state) }
         status.button?.toolTip = "focusMonitor: " + state
         if !tracking { watching.title = "Watching: –" }
@@ -449,6 +544,11 @@ final class App: NSObject, NSApplicationDelegate {
         // Glancing at another screen while writing must not steal focus. Reset the dwell so it
         // only counts once you've stopped typing.
         if CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown) < defaults.double(forKey: "typingGrace") {
+            deb.candidate = nil
+            return
+        }
+        // Never switch away from listed apps (games, presentations, …).
+        if appRule("keepFocus").contains(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "") {
             deb.candidate = nil
             return
         }
@@ -595,7 +695,7 @@ func selftest() {
 
 if CommandLine.arguments.contains("selftest") { selftest(); exit(0) }
 defaults.register(defaults: ["dwell": 0.6, "typingGrace": 2.0, "enabled": true, "glow": true, "glowColor": "0.2 0.78 0.35 0.8", "glowFade": 0.8,
-                                    "margin": 0.3, "mouseGrace": 1.0, "movePointer": false])
+                                    "margin": 0.3, "mouseGrace": 1.0, "movePointer": false, "pauseInCalls": true])
 let delegate = App()
 NSApplication.shared.delegate = delegate
 NSApplication.shared.run()

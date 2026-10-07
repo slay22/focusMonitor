@@ -20,12 +20,12 @@ Ideas, roughly in priority order within each section. ⭐ = high value for littl
 - [x] **Move the mouse pointer** to the newly focused screen (optional): today the pointer stays behind.
 - [x] **Mouse guard**: don't switch away while the mouse is moving or dragging on the current screen,
   the same way the typing guard works.
-- [ ] **Per-app rules**: never take focus away from some apps (screen sharing, fullscreen video, games),
+- [x] **Per-app rules**: never take focus away from some apps (screen sharing, fullscreen video, games),
   or never give focus to some (e.g. a monitoring dashboard).
-- [ ] **Auto-pause when another app uses the camera** (video calls), or when the screen is locked or asleep.
-- [ ] **Sleep/wake and camera unplug**: restart the capture session after wake. When the profile's camera
+- [x] **Auto-pause when another app uses the camera** (video calls), or when the screen is locked or asleep.
+- [x] **Sleep/wake and camera unplug**: restart the capture session after wake. When the profile's camera
   disappears, fall back and say so in the log.
-- [ ] **Better window match**: raise the exact window by window ID (private `_AXUIElementGetWindow`) instead
+- [x] **Better window match**: raise the exact window by window ID (private `_AXUIElementGetWindow`) instead
   of matching its frame, which picks the wrong one when two windows share the same frame.
 
 ## UX
