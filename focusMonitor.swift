@@ -304,7 +304,7 @@ func string(from c: Color) -> String {
 
 // MARK: Flash effects on the screen that gets focus.
 
-let flashEffects = ["Fade", "Pulse", "Ripple", "Orbit", "Dissolve", "Explode", "Random"]
+let flashEffects = ["Fade", "Pulse", "Ripple", "Orbit", "Dissolve", "Explode", "Splash", "Random"]
 let flashHold = 0.4 // "Fade" stays solid this long before fading
 
 /// Point at fraction u (0...1, clockwise from top-left) along the border of `size`, inset by `inset`.
@@ -371,6 +371,29 @@ struct Flash: View {
                         shard.translateBy(x: x, y: y)
                         shard.rotate(by: .radians(e * (rnd(i, 4) - 0.5) * 20))
                         shard.fill(Path(CGRect(x: -s / 2, y: -s / 2, width: s, height: s * 0.6)), with: .color(color))
+                    }
+                case "Splash": // a drop falls into the middle: rings spread out, droplets fly up and fall back
+                    let c = CGPoint(x: size.width / 2, y: size.height * 0.6), hit = 0.15 // fraction of the time the fall takes
+                    if t < hit {
+                        let y = size.height * 0.6 * (t / hit) * (t / hit)
+                        ctx.fill(Path(ellipseIn: CGRect(x: c.x - 9, y: y - 14, width: 18, height: 26)), with: .color(color))
+                        break
+                    }
+                    let a = (t - hit) / (1 - hit), ea = e - hit * duration // progress and seconds since impact
+                    for k in 0..<4 { // ripples, flattened for perspective
+                        let tk = a * 1.3 - Double(k) * 0.12
+                        guard tk > 0 && tk < 1 else { continue }
+                        let rx = tk * size.width * 0.45
+                        ctx.stroke(Path(ellipseIn: CGRect(x: c.x - rx, y: c.y - rx * 0.28, width: 2 * rx, height: rx * 0.56)),
+                                   with: .color(color.opacity((1 - tk) * 0.9)), lineWidth: 6 * (1 - tk) + 1.5)
+                    }
+                    ctx.opacity = 1 - a * a
+                    for i in 0..<70 { // crown of droplets
+                        let ang = -.pi / 2 + (rnd(i, 5) - 0.5) * 2.4, v = 500 + 800 * rnd(i, 6)
+                        let x = c.x + cos(ang) * v * ea, y = c.y + sin(ang) * v * ea + 1600 * ea * ea
+                        guard y <= c.y + 4 else { continue } // back in the water
+                        let r = 3 + 6 * rnd(i, 7)
+                        ctx.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: 2 * r, height: 2 * r)), with: .color(color))
                     }
                 default: // "Fade"
                     ctx.opacity = 1 - max(0, min(1, (e - flashHold) / duration))
