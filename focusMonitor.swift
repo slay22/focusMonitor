@@ -302,6 +302,85 @@ func string(from c: Color) -> String {
     return "\(n.redComponent) \(n.greenComponent) \(n.blueComponent) \(n.alphaComponent)"
 }
 
+// MARK: Flash effects on the screen that gets focus.
+
+let flashEffects = ["Fade", "Pulse", "Ripple", "Orbit", "Dissolve", "Explode", "Random"]
+let flashHold = 0.4 // "Fade" stays solid this long before fading
+
+/// Point at fraction u (0...1, clockwise from top-left) along the border of `size`, inset by `inset`.
+func perimeter(_ size: CGSize, _ u: Double, inset: Double = 4) -> CGPoint {
+    let w = size.width - 2 * inset, h = size.height - 2 * inset
+    var d = (u - u.rounded(.down)) * 2 * (w + h)
+    if d < w { return CGPoint(x: inset + d, y: inset) }; d -= w
+    if d < h { return CGPoint(x: inset + w, y: inset + d) }; d -= h
+    if d < w { return CGPoint(x: inset + w - d, y: inset + h) }; d -= w
+    return CGPoint(x: inset, y: inset + h - d)
+}
+/// Stable pseudo-random 0..<1 per (i, k), so particles keep their path from frame to frame.
+func rnd(_ i: Int, _ k: Int) -> Double {
+    let x = sin(Double(i) * 12.9898 + Double(k) * 78.233) * 43758.5453
+    return x - x.rounded(.down)
+}
+
+struct Flash: View {
+    let effect: String, color: Color, duration: Double
+    let start = Date()
+
+    var body: some View {
+        TimelineView(.animation) { tl in
+            Canvas { ctx, size in
+                let e = tl.date.timeIntervalSince(start), t = min(1, e / duration)
+                let frame = Path(CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4))
+                switch effect {
+                case "Pulse": // three heartbeats, dying out
+                    ctx.opacity = (1 - t) * (0.55 + 0.45 * cos(t * 6 * .pi))
+                    ctx.stroke(frame, with: .color(color), lineWidth: 8 + 8 * (1 - t))
+                case "Ripple": // echoes of the frame running inward
+                    for k in 0..<3 {
+                        let tk = min(1, max(0, t * 1.6 - Double(k) * 0.3))
+                        guard tk > 0 && tk < 1 else { continue }
+                        let r = CGRect(origin: .zero, size: size).insetBy(dx: 4 + tk * size.width * 0.3, dy: 4 + tk * size.height * 0.3)
+                        ctx.stroke(Path(roundedRect: r, cornerRadius: 40 * tk), with: .color(color.opacity(1 - tk)), lineWidth: 8 * (1 - tk) + 2)
+                    }
+                case "Orbit": // a comet runs once around the border
+                    for j in 0..<24 {
+                        let u = t * 1.1 - Double(j) * 0.006
+                        var p = Path(); p.move(to: perimeter(size, u)); p.addLine(to: perimeter(size, u + 0.006))
+                        ctx.stroke(p, with: .color(color.opacity((1 - Double(j) / 24) * min(1, (1 - t) * 4))),
+                                   style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                    }
+                case "Dissolve": // the frame crumbles block by block
+                    let n = Int(2 * (size.width + size.height) / 8)
+                    for i in 0..<n where rnd(i, 0) > t {
+                        let p = perimeter(size, Double(i) / Double(n))
+                        ctx.fill(Path(CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)), with: .color(color))
+                    }
+                case "Explode": // the frame shatters, shards fly inward and fall
+                    ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(color.opacity(max(0, 0.25 - e))))
+                    let c = CGPoint(x: size.width / 2, y: size.height / 2)
+                    let n = Int(2 * (size.width + size.height) / 14)
+                    ctx.opacity = 1 - t
+                    for i in 0..<n {
+                        let p0 = perimeter(size, Double(i) / Double(n))
+                        let dx = c.x - p0.x, dy = c.y - p0.y, len = max(1, hypot(dx, dy))
+                        let v = 300 + 900 * rnd(i, 1), spread = (rnd(i, 2) - 0.5) * 700
+                        let x = p0.x + (dx / len * v - dy / len * spread) * e
+                        let y = p0.y + (dy / len * v + dx / len * spread) * e + 900 * e * e
+                        let s = 6 + 10 * rnd(i, 3)
+                        var shard = ctx
+                        shard.translateBy(x: x, y: y)
+                        shard.rotate(by: .radians(e * (rnd(i, 4) - 0.5) * 20))
+                        shard.fill(Path(CGRect(x: -s / 2, y: -s / 2, width: s, height: s * 0.6)), with: .color(color))
+                    }
+                default: // "Fade"
+                    ctx.opacity = 1 - max(0, min(1, (e - flashHold) / duration))
+                    ctx.stroke(frame, with: .color(color), lineWidth: 8)
+                }
+            }
+        }
+    }
+}
+
 
 struct SettingsView: View {
     @AppStorage("camera") var camera = ""
@@ -314,6 +393,7 @@ struct SettingsView: View {
     @AppStorage("glow") var glow = true
     @AppStorage("glowColor") var glowColor = ""
     @AppStorage("glowFade") var glowFade = 0.8
+    @AppStorage("glowEffect") var glowEffect = "Fade"
     @ObservedObject var log = Log.shared
     @ObservedObject var live = Live.shared
     let onCameraChange: (String) -> Void
@@ -361,8 +441,9 @@ struct SettingsView: View {
             }
             Toggle("Flash the screen that gets focus", isOn: $glow)
             Group {
+                Picker("Flash effect", selection: $glowEffect) { ForEach(flashEffects, id: \.self) { Text($0) } }
                 ColorPicker("Flash color", selection: Binding(get: { color(from: glowColor) }, set: { glowColor = string(from: $0) }))
-                LabeledContent("Fade out over") {
+                LabeledContent("Effect duration") {
                     Slider(value: $glowFade, in: 0.2...3, step: 0.1)
                     Text(String(format: "%.1f s", glowFade)).monospacedDigit().frame(width: 44)
                 }
@@ -672,7 +753,7 @@ final class App: NSObject, NSApplicationDelegate {
         if defaults.bool(forKey: "glow") { glow(screen) }
     }
 
-    /// Brief green frame around the screen focus just moved to; click-through, fades out.
+    /// Brief colored frame around the screen focus just moved to, animated by `Flash`; click-through.
     func glow(_ screen: NSScreen) {
         glow?.close()
         let w = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
@@ -683,13 +764,14 @@ final class App: NSObject, NSApplicationDelegate {
         w.isReleasedWhenClosed = false
         w.level = .screenSaver // above everything, and not layer 0 so focusFrontWindow never picks it
         w.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
-        w.contentView = NSHostingView(rootView: Rectangle().strokeBorder(color(from: defaults.string(forKey: "glowColor") ?? ""), lineWidth: 8))
+        var effect = defaults.string(forKey: "glowEffect") ?? "Fade"
+        if effect == "Random" { effect = flashEffects.dropLast().randomElement()! }
+        let duration = defaults.double(forKey: "glowFade")
+        w.contentView = NSHostingView(rootView: Flash(effect: effect, color: color(from: defaults.string(forKey: "glowColor") ?? ""), duration: duration))
         w.setFrame(screen.frame, display: true)
         w.orderFrontRegardless()
         glow = w
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            NSAnimationContext.runAnimationGroup({ $0.duration = defaults.double(forKey: "glowFade"); w.animator().alphaValue = 0 }) { w.orderOut(nil) }
-        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + (effect == "Fade" ? flashHold : 0)) { w.close() }
     }
 
     // MARK: Calibration: a panel on each screen in turn; look at it until it moves on.
@@ -771,6 +853,11 @@ func selftest() {
     precondition(nearest(yaw: 1.5, pitch: 0, a, reach: awayReach) == nil)     // turned far right: looking away
     precondition(nearest(yaw: 0.7, pitch: 0, a, reach: awayReach) == 2)       // right screen's edge: still 2
     precondition(setupKey([3, 1, 2]) == setupKey([2, 3, 1]))
+    let sz = CGSize(width: 108, height: 58) // border 100 x 50 inside the 4 px inset
+    precondition(perimeter(sz, 0) == CGPoint(x: 4, y: 4) && perimeter(sz, 1) == CGPoint(x: 4, y: 4))
+    precondition(perimeter(sz, 100.0 / 300) == CGPoint(x: 104, y: 4))     // top-right corner
+    precondition(perimeter(sz, 150.0 / 300) == CGPoint(x: 104, y: 54))    // bottom-right corner
+    precondition(perimeter(sz, -0.25) == perimeter(sz, 0.75))             // wraps
     precondition(string(from: color(from: "1.0 0.5 0.0 0.75")) == "1.0 0.5 0.0 0.75") // color survives storage
     var pc = Pacer()
     precondition(pc.next((0, 0), at: 0, fast: 0.1) == 0.1)         // first face: fast
@@ -791,7 +878,7 @@ func selftest() {
 }
 
 if CommandLine.arguments.contains("selftest") { selftest(); exit(0) }
-defaults.register(defaults: ["dwell": 0.6, "typingGrace": 2.0, "enabled": true, "glow": true, "glowColor": "0.2 0.78 0.35 0.8", "glowFade": 0.8,
+defaults.register(defaults: ["dwell": 0.6, "typingGrace": 2.0, "enabled": true, "glow": true, "glowColor": "0.2 0.78 0.35 0.8", "glowFade": 0.8, "glowEffect": "Fade",
                                     "margin": 0.3, "mouseGrace": 1.0, "movePointer": false, "pauseInCalls": true])
 let delegate = App()
 NSApplication.shared.delegate = delegate

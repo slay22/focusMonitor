@@ -35,6 +35,7 @@ Ideas, roughly in priority order within each section. ⭐ = high value for littl
 - [x] **Permission status in Settings** (Camera / Accessibility ✓/✗) + "Open Accessibility Settings…" button.
 - [ ] **Configurable pause hotkey** (now fixed at ⌃⌥⌘P).
 - [ ] **Profile management** in Settings: list, rename, delete, recalibrate a profile.
+- [x] **Flash effects**: Fade, Pulse, Ripple, Orbit, Dissolve, Explode, Random.
 - [ ] **Glow options**: thickness, edges only vs. corners, or a small badge instead of a frame.
 
 ## Engineering

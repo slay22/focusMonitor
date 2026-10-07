@@ -15,7 +15,8 @@ editor on the right, and keep typing. No click or Cmd-Tab needed.
 - **Window-level focus**: only the window on the watched screen comes forward. Other windows of the
   same app on other screens stay where they are.
 - **Pointer follows** (optional): the mouse pointer jumps back to where it was on the newly focused screen.
-- **Focus glow**: a short colored frame on the screen that just got focus (color and fade configurable).
+- **Focus flash**: a short colored frame on the screen that just got focus, with effects: Fade, Pulse,
+  Ripple, Orbit, Dissolve, Explode or Random (color and duration configurable).
 
 **No accidental switches**
 - **Typing & mouse guards**: glancing at another screen while typing or using the mouse doesn't steal focus.
@@ -69,7 +70,7 @@ reads out which screen is next. Recalibrate from the menu whenever you move the 
 |---|---|
 | Status | Live **Facing** readout (screen, *between screens*, *looking away* + raw angles), Camera / Accessibility permission, Launch at login |
 | Tracking | Camera, switch delay, switch margin, mouse guard, pointer follows, pause during video calls, typing guard |
-| Glow | On/off, color (with opacity), fade time, Preview |
+| Glow | On/off, effect, color (with opacity), duration, Preview |
 | Calibration | Current monitor setup, Recalibrate |
 | App rules | *Never switch away from* / *Never focus* lists |
 | Log | Focus switches, status changes, calibration results, warnings |
