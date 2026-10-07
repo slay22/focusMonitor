@@ -24,6 +24,7 @@ cat > $APP/Contents/Info.plist <<PLIST
   <key>CFBundleExecutable</key><string>focusMonitor</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>$(git describe --always --dirty 2>/dev/null || echo dev)</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSCameraUsageDescription</key><string>Tracks which monitor you are facing to focus its window. Video never leaves your Mac.</string>

@@ -309,6 +309,20 @@ struct SettingsView: View {
                 }
                 .frame(height: 220) // fixed, so the log scrolls inside its box instead of stretching the Form
             }
+            Section("About") {
+                HStack(spacing: 14) {
+                    Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 56, height: 56)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("focusMonitor").font(.headline)
+                        Text("Look at a monitor, and its front window gets focus.").foregroundStyle(.secondary)
+                        let info = Bundle.main.infoDictionary ?? [:]
+                        Text("Version \(info["CFBundleShortVersionString"] as? String ?? "?") (\(info["CFBundleVersion"] as? String ?? "?"))")
+                            .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        Link("github.com/slay22/focusMonitor", destination: URL(string: "https://github.com/slay22/focusMonitor")!)
+                            .font(.caption)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(minWidth: 500, minHeight: 720) // grouped Form has no natural height
