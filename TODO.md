@@ -9,6 +9,8 @@ Ideas, roughly in priority order within each section. ⭐ = high value for littl
   calibration toward your current head pose. This corrects drift from chair or camera moves without recalibrating.
 - [ ] **Eye gaze on top of head pose**: use pupil landmarks from `VNDetectFaceLandmarksRequest`, so
   glances with the eyes alone count too, and screens close together become easier to tell apart.
+  Try Vision landmarks first (free, one file). If too imprecise: a gaze-estimation model on Core AI
+  (Apple's successor to Core ML), at the cost of a model file, possibly Xcode and a newer macOS minimum.
 - [ ] **More calibration points** per screen (e.g. corners) for very large or ultrawide monitors.
 - [ ] **Which window *within* a screen**: with two windows side by side on one monitor, focus the half you look at.
   Head pose can roughly tell left from right on a wide monitor if calibrated with points per half (see "more
