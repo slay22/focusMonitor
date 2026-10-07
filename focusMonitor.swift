@@ -1,5 +1,7 @@
 import AppKit
 import AVFoundation
+import CoreAudio
+import CoreMediaIO
 import IOKit.ps
 import ServiceManagement
 import SwiftUI
@@ -141,7 +143,10 @@ final class HeadTracker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate 
         return cam.uniqueID
     }
 
+    private(set) var wantsRunning = false // our intent; session.isRunning lags behind it
+
     func setRunning(_ on: Bool) {
+        wantsRunning = on
         control.async { [session] in
             if on != session.isRunning { on ? session.startRunning() : session.stopRunning() }
         }
@@ -160,6 +165,57 @@ final class HeadTracker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate 
         guard let pose else { return }
         DispatchQueue.main.async { self.onPose(pose.yaw, pose.pitch) }
     }
+}
+
+// MARK: - Call detection
+
+// AVCaptureDevice.isInUseByAnotherApplication always reads false (macOS 26, Photo Booth open), so ask the
+// lower layers: CoreMediaIO for cameras, CoreAudio for microphones.
+
+/// Camera UIDs (= AVCaptureDevice.uniqueID) that are running in any process, ours included.
+func camerasRunning() -> [String] {
+    var addr = CMIOObjectPropertyAddress(mSelector: CMIOObjectPropertySelector(kCMIOHardwarePropertyDevices),
+                                         mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal),
+                                         mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementMain))
+    var size: UInt32 = 0
+    CMIOObjectGetPropertyDataSize(CMIOObjectID(kCMIOObjectSystemObject), &addr, 0, nil, &size)
+    var ids = [CMIOObjectID](repeating: 0, count: Int(size) / MemoryLayout<CMIOObjectID>.size)
+    CMIOObjectGetPropertyData(CMIOObjectID(kCMIOObjectSystemObject), &addr, 0, nil, size, &size, &ids)
+    return ids.compactMap { id in
+        var running: UInt32 = 0, rs = UInt32(MemoryLayout<UInt32>.size)
+        addr.mSelector = CMIOObjectPropertySelector(kCMIODevicePropertyDeviceIsRunningSomewhere)
+        CMIOObjectGetPropertyData(id, &addr, 0, nil, rs, &rs, &running)
+        var uid: Unmanaged<CFString>?, us = UInt32(MemoryLayout<CFString?>.size)
+        addr.mSelector = CMIOObjectPropertySelector(kCMIODevicePropertyDeviceUID)
+        CMIOObjectGetPropertyData(id, &addr, 0, nil, us, &us, &uid)
+        return running != 0 ? uid?.takeRetainedValue() as String? : nil
+    }
+}
+
+/// True when another process records from a microphone (every call does; we never do). macOS 14.2+.
+func micInUseByOthers() -> Bool {
+    guard #available(macOS 14.2, *) else { return false }
+    func get(_ obj: AudioObjectID, _ sel: AudioObjectPropertySelector) -> UInt32 {
+        var a = AudioObjectPropertyAddress(mSelector: sel, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var value: UInt32 = 0, size = UInt32(MemoryLayout<UInt32>.size)
+        AudioObjectGetPropertyData(obj, &a, 0, nil, &size, &value)
+        return value
+    }
+    var a = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyProcessObjectList,
+                                       mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, &size)
+    var procs = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+    AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, &size, &procs)
+    return procs.contains { p in
+        get(p, kAudioProcessPropertyIsRunningInput) != 0 && pid_t(bitPattern: get(p, kAudioProcessPropertyPID)) != getpid()
+    }
+}
+
+/// In a call (or another app filming): a microphone in use, or a camera running that isn't ours.
+// ponytail: another app on *our* camera without a mic (Photo Booth) is invisible while we capture; calls aren't.
+func otherAppUsingCameraOrMic(ownCamera: String?) -> Bool {
+    micInUseByOthers() || camerasRunning().contains { $0 != ownCamera }
 }
 
 // MARK: - Focus
@@ -298,7 +354,7 @@ struct SettingsView: View {
                 Text(mouseGrace == 0 ? "off" : String(format: "%.1f s", mouseGrace)).monospacedDigit().frame(width: 44)
             }
             Toggle("Move the mouse pointer to the focused screen", isOn: $movePointer)
-            Toggle("Pause during video calls (another app uses a camera)", isOn: $pauseInCalls)
+            Toggle("Pause during calls (another app uses the microphone or a camera)", isOn: $pauseInCalls)
             LabeledContent("Pause after typing for") {
                 Slider(value: $typingGrace, in: 0...5, step: 0.5)
                 Text(typingGrace == 0 ? "off" : String(format: "%.1f s", typingGrace)).monospacedDigit().frame(width: 44)
@@ -407,7 +463,7 @@ final class App: NSObject, NSApplicationDelegate {
     let watching = NSMenuItem(title: "Watching: –", action: nil, keyEquivalent: "")
     var glow: NSWindow?
     var pointerSpots: [CGDirectDisplayID: CGPoint] = [:]
-    var pausedBy: Set<String> = [] // automatic pauses: "video call", "screen locked", "screen asleep"
+    var pausedBy: Set<String> = [] // automatic pauses: "in a call", "screen locked", "screen asleep"
     var deb = Debouncer()
     var settingsWindow: NSWindow?
     // Calibration in progress: screens still to do, results so far, current screen's samples.
@@ -476,10 +532,11 @@ final class App: NSObject, NSApplicationDelegate {
         wnc.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { _ in pauseOn("screen asleep", true) }
         wnc.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { _ in pauseOn("screen asleep", false) }
         wnc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [unowned self] _ in restartCamera() }
-        // Video call = some other app has a camera open. Polled: there's no notification for it.
+        // Calls: polled, there's no notification for it. Our own camera only counts as "other" while we don't want it.
         Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
-            let inCall = defaults.bool(forKey: "pauseInCalls") && HeadTracker.cameras.contains { $0.isInUseByAnotherApplication }
-            if inCall != self.pausedBy.contains("video call") { pauseOn("video call", inCall) }
+            let own = self.tracker.wantsRunning ? defaults.string(forKey: "camera") : nil
+            let inCall = defaults.bool(forKey: "pauseInCalls") && otherAppUsingCameraOrMic(ownCamera: own)
+            if inCall != self.pausedBy.contains("in a call") { pauseOn("in a call", inCall) }
         }
     }
 

@@ -24,8 +24,10 @@ macOS menu bar app (Swift, AppKit + SwiftUI + Vision). Webcam head pose → whic
   behavior), and `NSRunningApplication.activate()` is refused for background processes. `GetProcessForPID` is bound
   with `@_silgen_name` because Swift hides it as deprecated. The exact AX window is found via private
   `_AXUIElementGetWindow` (window ID), falling back to frame matching.
-- Video-call pause uses `AVCaptureDevice.isInUseByAnotherApplication` (polled every 3 s). It reads `false` when
-  the other camera user is a process from the same terminal, so test it with a real app (Photo Booth, FaceTime).
+- Call pause: `AVCaptureDevice.isInUseByAnotherApplication` is useless (always `false`, even with Photo Booth open).
+  Instead, polled every 3 s: CoreAudio per-process `kAudioProcessPropertyIsRunningInput` (any other process on a mic,
+  macOS 14.2+) or CoreMediaIO `kCMIODevicePropertyDeviceIsRunningSomewhere` for any camera except our own. Our own
+  camera counts only while `tracker.wantsRunning` is false. Known gap: another app on our camera without a mic.
 - Head pose, not eye gaze: `VNDetectFaceRectanglesRequest` revision 3 yaw/pitch, nearest calibrated anchor.
 - Profiles are keyed by the sorted set of connected `CGDirectDisplayID`s (stable per monitor: vendor/model/serial).
   `~/.focusmonitor.json` is `[setupKey: Profile]`. `loadProfiles()` still reads the old `[Anchor]` format.

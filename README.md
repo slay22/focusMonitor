@@ -26,7 +26,8 @@ editor on the right, and keep typing. No click or Cmd-Tab needed.
 **Fits your day**
 - **Profiles per monitor setup** (home, office, …). Each set of connected monitors gets its own
   calibration and camera, and the right profile is picked automatically when you plug in.
-- **Auto-pause** (camera off): with only one display (laptop-only in a meeting), during video calls,
+- **Auto-pause** (camera off): with only one display (laptop-only in a meeting), during calls (another app
+  uses the microphone or a camera),
   and while the screen is locked or asleep.
 - **Camera recovery**: restarts after sleep, falls back to another camera if yours is unplugged, and
   switches back when it returns.
