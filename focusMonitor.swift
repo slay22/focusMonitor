@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import IOKit.ps
+import ServiceManagement
 import SwiftUI
 import Vision
 
@@ -28,6 +29,13 @@ func log(_ msg: String) {
         Log.shared.lines.insert(line, at: 0)
         if Log.shared.lines.count > 300 { Log.shared.lines.removeLast() }
     }
+}
+
+/// What the camera sees right now, for the Settings window (only updated while it's open).
+final class Live: ObservableObject {
+    static let shared = Live()
+    @Published var facing = ""
+    @Published var seen = Date.distantPast
 }
 
 // MARK: - Gaze -> display
@@ -215,12 +223,29 @@ struct SettingsView: View {
     @AppStorage("glowColor") var glowColor = ""
     @AppStorage("glowFade") var glowFade = 0.8
     @ObservedObject var log = Log.shared
+    @ObservedObject var live = Live.shared
     let onCameraChange: (String) -> Void
     let onRecalibrate: () -> Void
     let onPreviewGlow: () -> Void
 
     var body: some View {
         Form {
+            Section("Status") {
+                // Re-checked every half second: permissions change in System Settings, faces come and go.
+                TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
+                    LabeledContent("Facing") {
+                        Text(ctx.date.timeIntervalSince(live.seen) < 1 ? live.facing : "no face (or camera off)")
+                            .monospacedDigit()
+                    }
+                    permission("Camera", AVCaptureDevice.authorizationStatus(for: .video) == .authorized, pane: "Privacy_Camera")
+                    permission("Accessibility", AXIsProcessTrusted(), pane: "Privacy_Accessibility")
+                }
+                Toggle("Launch at login", isOn: Binding(get: { SMAppService.mainApp.status == .enabled }, set: { on in
+                    do { try on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister() }
+                    catch { focusMonitor.log("Launch at login: \(error.localizedDescription)") }
+                    if SMAppService.mainApp.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+                }))
+            }
             Picker("Camera", selection: Binding(get: { camera }, set: { camera = $0; onCameraChange($0) })) {
                 ForEach(HeadTracker.cameras, id: \.uniqueID) { Text($0.localizedName).tag($0.uniqueID) }
             }
@@ -265,7 +290,20 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(minWidth: 500, minHeight: 640) // grouped Form has no natural height
+        .frame(minWidth: 500, minHeight: 720) // grouped Form has no natural height
+    }
+
+    func permission(_ name: String, _ granted: Bool, pane: String) -> some View {
+        LabeledContent(name) {
+            if granted {
+                Label("Granted", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            } else {
+                Label("Missing", systemImage: "xmark.octagon.fill").foregroundStyle(.red)
+                Button("Open Settings…") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)")!)
+                }
+            }
+        }
     }
 }
 
@@ -389,7 +427,19 @@ final class App: NSObject, NSApplicationDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
+    /// "LG FHD", "between screens", "looking away" + raw angles, using the same rules as switching.
+    func showFacing(yaw: Double, pitch: Double) {
+        let anchors = profile?.anchors ?? []
+        let name = { (id: CGDirectDisplayID) in screens().first { $0.id == id }?.screen.localizedName ?? "?" }
+        let verdict = anchors.isEmpty ? "not calibrated"
+            : nearest(yaw: yaw, pitch: pitch, anchors, reach: 0.75) == nil ? "looking away"
+            : nearest(yaw: yaw, pitch: pitch, anchors, margin: defaults.double(forKey: "margin")).map(name) ?? "between screens"
+        Live.shared.facing = String(format: "%@   (yaw %+.2f, pitch %+.2f)", verdict, yaw, pitch)
+        Live.shared.seen = Date()
+    }
+
     func pose(yaw: Double, pitch: Double) {
+        if settingsWindow?.isVisible == true { showFacing(yaw: yaw, pitch: pitch) }
         if !calibQueue.isEmpty { // calibrating: no focus switching, sample once the panel's delay is over
             if calibSamples != nil { calibrationSample(yaw, pitch) }
             return

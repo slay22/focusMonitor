@@ -13,7 +13,7 @@ Ideas, roughly in priority order within each section. ⭐ = high value for littl
 - [ ] **Which window *within* a screen**: with two windows side by side on one monitor, focus the half you look at.
   Head pose can roughly tell left from right on a wide monitor if calibrated with points per half (see "more
   calibration points"), but finer than that needs real eye gaze (see above).
-- [ ] **Live "facing: \<screen\>" indicator** in Settings for tuning (pose → screen, without switching).
+- [x] **Live "facing: \<screen\>" indicator** in Settings for tuning (pose → screen, without switching).
 
 ## Behaviour
 
@@ -30,9 +30,9 @@ Ideas, roughly in priority order within each section. ⭐ = high value for littl
 
 ## UX
 
-- [ ] ⭐ **Stable code signing** (self-signed certificate + script) so the Accessibility grant survives rebuilds.
-- [ ] ⭐ **Launch at login** toggle (`SMAppService.mainApp.register()`).
-- [ ] ⭐ **Permission status in Settings** (Camera / Accessibility ✓/✗) + "Open Accessibility Settings…" button.
+- [x] **Stable code signing** (self-signed certificate + script) so the Accessibility grant survives rebuilds.
+- [x] **Launch at login** toggle (`SMAppService.mainApp.register()`).
+- [x] **Permission status in Settings** (Camera / Accessibility ✓/✗) + "Open Accessibility Settings…" button.
 - [ ] **Configurable pause hotkey** (now fixed at ⌃⌥⌘P).
 - [ ] **Profile management** in Settings: list, rename, delete, recalibrate a profile.
 - [ ] **Glow options**: thickness, edges only vs. corners, or a small badge instead of a frame.

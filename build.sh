@@ -29,4 +29,7 @@ cat > $APP/Contents/Info.plist <<PLIST
   <key>NSCameraUsageDescription</key><string>Tracks which monitor you are facing to focus its window. Video never leaves your Mac.</string>
 </dict></plist>
 PLIST
-codesign --force --sign "${SIGN_ID:--}" $APP
+# Stable identity from ./make-cert.sh if present (permissions survive rebuilds), else ad-hoc.
+ID="focusMonitor Self-Signed"
+security find-identity -p codesigning | grep -q "$ID" || ID=-
+codesign --force --sign "${SIGN_ID:-$ID}" $APP

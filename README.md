@@ -21,22 +21,24 @@ editor on the right, and keep typing. No click or Cmd-Tab needed.
 - **Auto-pause** (camera off) when only one display is connected, e.g. laptop-only in a meeting.
 - **Pause / resume** from the menu or with **⌃⌥⌘P** from anywhere.
 - **Focus glow**: a short colored frame on the screen that just got focus (color and fade configurable).
-- **Settings**: camera, switch delay, typing pause, glow, recalibration, live log.
+- **Settings**: live "facing" readout, permission status, launch at login, camera, delays, guards, glow,
+  recalibration, live log.
 
 ## Install
 
 Needs macOS 14+ and the Xcode Command Line Tools (`xcode-select --install`).
 
 ```sh
+./make-cert.sh   # once: self-signed signing identity, so permissions survive rebuilds
 ./build.sh && open focusMonitor.app
 ```
 
-On first launch, grant **Camera** and **Accessibility** in System Settings → Privacy & Security.
+On first launch, grant **Camera** and **Accessibility** in System Settings → Privacy & Security
+(Settings → Status shows both, with buttons to the right pane).
 Calibration starts automatically: look at each screen as the 👁 panel appears on it.
 
-> The app is ad-hoc signed, so macOS forgets the Accessibility grant after every rebuild:
-> remove focusMonitor from the list and add it again. To avoid this, sign with a stable certificate:
-> `SIGN_ID="My Cert" ./build.sh`.
+> Without `make-cert.sh` the app is ad-hoc signed, and macOS forgets the Accessibility grant after
+> every rebuild. To use your own certificate instead: `SIGN_ID="My Cert" ./build.sh`.
 
 ## How it works
 
