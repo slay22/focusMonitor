@@ -51,12 +51,16 @@ func loadProfiles() -> [String: Profile] {
 
 // ponytail: head pose (yaw/pitch), not eye tracking. Works when you turn your head between
 // monitors; eyes-only glances won't register. Upgrade path: eye landmarks from VNDetectFaceLandmarksRequest.
-/// Nearest calibrated display, or nil when it's too close to call: the nearest must be within
-/// (1 - margin) × the runner-up's distance. margin 0 = plain nearest, 0.3 = clearly facing one screen.
-func nearest(yaw: Double, pitch: Double, _ anchors: [Anchor], margin: Double = 0) -> CGDirectDisplayID? {
+/// Nearest calibrated display, or nil when undecided:
+/// - between screens: the nearest must be within (1 - margin) × the runner-up's distance;
+/// - looking away (colleague, window): the nearest must be within `reach` × the gap between the two closest screens.
+func nearest(yaw: Double, pitch: Double, _ anchors: [Anchor], margin: Double = 0, reach: Double = .infinity) -> CGDirectDisplayID? {
     let ranked = anchors.map { (a: $0, d: hypot($0.yaw - yaw, $0.pitch - pitch)) }.sorted { $0.d < $1.d }
     guard let best = ranked.first else { return nil }
     if ranked.count > 1, best.d > (1 - margin) * ranked[1].d { return nil }
+    // ponytail: closest pair as the scale; fine for rows of monitors, revisit for very uneven layouts.
+    let gap = anchors.flatMap { a in anchors.map { b in hypot(a.yaw - b.yaw, a.pitch - b.pitch) } }.filter { $0 > 0 }.min()
+    if let gap, best.d > reach * gap { return nil }
     return best.a.display
 }
 
@@ -397,8 +401,9 @@ final class App: NSObject, NSApplicationDelegate {
             deb.candidate = nil
             return
         }
-        // Head between two screens: undecided, the dwell starts over once it's clear again.
-        guard let d = nearest(yaw: yaw, pitch: pitch, profile?.anchors ?? [], margin: defaults.double(forKey: "margin")) else {
+        // Head between two screens, or turned away from all of them: undecided, focus stays put and
+        // the dwell starts over once it's clear again. (Leaving the desk = no face = no samples at all.)
+        guard let d = nearest(yaw: yaw, pitch: pitch, profile?.anchors ?? [], margin: defaults.double(forKey: "margin"), reach: 0.75) else {
             deb.candidate = nil
             return
         }
@@ -514,6 +519,8 @@ func selftest() {
     precondition(nearest(yaw: 0, pitch: 0, a) == 3)                      // ...but plain nearest picks 3
     precondition(nearest(yaw: 0.45, pitch: 0, a, margin: 0.3) == 2)      // clearly 2
     precondition(nearest(yaw: 0.9, pitch: 0, [a[1]], margin: 0.3) == 2)  // single anchor always wins
+    precondition(nearest(yaw: 1.5, pitch: 0, a, reach: 0.75) == nil)     // turned far right: looking away
+    precondition(nearest(yaw: 0.7, pitch: 0, a, reach: 0.75) == 2)       // right screen's edge: still 2
     precondition(setupKey([3, 1, 2]) == setupKey([2, 3, 1]))
     precondition(string(from: color(from: "1.0 0.5 0.0 0.75")) == "1.0 0.5 0.0 0.75") // color survives storage
     let dwell = 0.6

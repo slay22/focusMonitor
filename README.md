@@ -13,6 +13,7 @@ editor on the right, and keep typing. No click or Cmd-Tab needed.
   same app on other screens stay where they are.
 - **Typing & mouse guards**: glancing at another screen while typing, or while using the mouse, doesn't steal focus.
 - **Switch margin**: with your head between two screens, nothing switches until it's clear which one you face.
+- **Look away freely**: turn to a colleague or leave the desk, and focus stays where it was.
 - **Pointer follows** (optional): the mouse pointer jumps to where it was on the newly focused screen.
 - **Battery aware**: analyzes half as often on battery or in Low Power Mode.
 - **Profiles per monitor setup** (home, office, …). Each set of connected monitors gets its own
