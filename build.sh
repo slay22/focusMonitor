@@ -13,7 +13,8 @@ if [ ! -f AppIcon.icns ]; then # delete AppIcon.icns to regenerate from icon.swi
   iconutil -c icns $T/AppIcon.iconset -o AppIcon.icns
 fi
 cp AppIcon.icns $APP/Contents/Resources/
-swiftc -O -swift-version 5 focusMonitor.swift -o $APP/Contents/MacOS/focusMonitor
+# macOS 14 = LSMinimumSystemVersion below; also makes the compiler reject newer APIs.
+swiftc -O -swift-version 5 -target arm64-apple-macos14 focusMonitor.swift -o $APP/Contents/MacOS/focusMonitor
 cat > $APP/Contents/Info.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

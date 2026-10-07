@@ -15,7 +15,8 @@ editor on the right, and keep typing. No click or Cmd-Tab needed.
 - **Switch margin**: with your head between two screens, nothing switches until it's clear which one you face.
 - **Look away freely**: turn to a colleague or leave the desk, and focus stays where it was.
 - **Pointer follows** (optional): the mouse pointer jumps to where it was on the newly focused screen.
-- **Battery aware**: analyzes half as often on battery or in Low Power Mode.
+- **Power aware**: slows down while your head is still or you're away, and analyzes half as often on battery
+  or in Low Power Mode.
 - **Profiles per monitor setup** (home, office, …). Each set of connected monitors gets its own
   calibration and camera, and the right profile is picked automatically when you plug in.
 - **Auto-pause** (camera off) with only one display (laptop-only in a meeting), during video calls,

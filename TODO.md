@@ -41,8 +41,9 @@ Ideas, roughly in priority order within each section. ⭐ = high value for littl
 
 - [x] **Measure CPU/battery**: ~10 % of one core at 10 detections/s (Apple's face model; our code is negligible),
   ~7.5 % at 5/s, which is now used on battery / Low Power Mode. Smaller frames and a lower camera fps measured no gain.
-- [ ] **Further power saving**: sample slowly (1–2/s) while nothing changes and speed up when the head starts turning.
-- [ ] **CI**: GitHub Actions builds the app and runs `selftest` on every push.
+- [x] **Further power saving**: ~2.5 detections/s while the head is still or no face is seen, full speed on movement.
+  CPU ~10 % → ~6–8 %. The remaining ~5 % is the camera pipeline itself, which detection rate doesn't change.
+- [x] **CI**: GitHub Actions builds the app and runs `selftest` on every push.
 - [ ] **Releases**: universal binary (arm64 + x86_64), zipped app on GitHub Releases, Homebrew cask.
   Notarization needs a paid Apple Developer ID.
 - [ ] **Split `focusMonitor.swift`** once it passes ~800 lines (tracking / focus / UI).

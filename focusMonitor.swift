@@ -7,7 +7,7 @@ import Vision
 
 // Settings (UserDefaults, edited in the Settings window): "dwell", "typingGrace", "camera", "enabled".
 let defaults = UserDefaults.standard
-/// Face detections per second: 10, or 5 on battery / Low Power Mode. Measured on an M-series Mac with a C920:
+/// Face detections per second: up to 10 (~7 in practice with a 15 fps camera), or 5 on battery / Low Power Mode. Measured on an M-series Mac with a C920:
 /// ~10 % of one core at 10/s, ~7.5 % at 5/s (+ ~3 % in macOS's USB camera service). Camera is off when paused or single-display.
 func sampleInterval() -> TimeInterval {
     let source = IOPSGetProvidingPowerSourceType(IOPSCopyPowerSourcesInfo()?.takeRetainedValue())?.takeUnretainedValue() as String?
@@ -74,6 +74,23 @@ func nearest(yaw: Double, pitch: Double, _ anchors: [Anchor], margin: Double = 0
 }
 
 /// Fires once per change, after the same display has been nearest for `dwell` seconds straight.
+/// Slows face detection down while nothing happens: head still for 2 s, or no face (away from the desk).
+/// Any head movement switches back to full speed. Costs at most `slow` extra delay on the first turn.
+struct Pacer {
+    var settled: (yaw: Double, pitch: Double)?, activeAt = 0.0
+    static let slow = 0.4 // 2.5 detections/s
+    /// `pose` is nil when no face was found. Returns the interval until the next detection.
+    mutating func next(_ pose: (yaw: Double, pitch: Double)?, at t: Double, fast: Double) -> Double {
+        // Compared with where the head settled, not the previous frame: frame-to-frame jitter measured up to
+        // 0.08 rad while sitting still. 0.15 rad (~9°) is well under any screen-to-screen turn (≥ 0.4).
+        if let p = pose, settled.map({ hypot($0.yaw - p.yaw, $0.pitch - p.pitch) > 0.15 }) ?? true {
+            activeAt = t
+            settled = p
+        }
+        return t - activeAt > 2 ? max(fast, Self.slow) : fast
+    }
+}
+
 struct Debouncer {
     var candidate: CGDirectDisplayID?, since = 0.0, current: CGDirectDisplayID?
     mutating func feed(_ d: CGDirectDisplayID, at t: Double, dwell: Double) -> CGDirectDisplayID? {
@@ -92,7 +109,8 @@ final class HeadTracker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate 
     private let control = DispatchQueue(label: "camera.control") // start/stopRunning block
     var onPose: (_ yaw: Double, _ pitch: Double) -> Void = { _, _ in } // called on main
     private var last = 0.0
-    private var interval = 0.1, intervalChecked = 0.0
+    private var interval = 0.1, fast = 0.1, fastChecked = 0.0
+    private var pacer = Pacer()
     private let req = VNDetectFaceRectanglesRequest() // revision 3: continuous yaw/pitch
 
     static var cameras: [AVCaptureDevice] {
@@ -131,14 +149,16 @@ final class HeadTracker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate 
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sb: CMSampleBuffer, from connection: AVCaptureConnection) {
         let t = ProcessInfo.processInfo.systemUptime
-        if t - intervalChecked > 30 { interval = sampleInterval(); intervalChecked = t } // power source changes rarely
+        if t - fastChecked > 30 { fast = sampleInterval(); fastChecked = t } // power source changes rarely
         guard t - last >= interval, let px = CMSampleBufferGetImageBuffer(sb) else { return }
         last = t
         try? VNImageRequestHandler(cvPixelBuffer: px).perform([req])
         // Biggest face = you, not someone walking behind you.
-        guard let face = req.results?.max(by: { $0.boundingBox.width < $1.boundingBox.width }),
-              let yaw = face.yaw?.doubleValue, let pitch = face.pitch?.doubleValue else { return }
-        DispatchQueue.main.async { self.onPose(yaw, pitch) }
+        let face = req.results?.max(by: { $0.boundingBox.width < $1.boundingBox.width })
+        let pose = face.flatMap { f in f.yaw.flatMap { y in f.pitch.map { (yaw: y.doubleValue, pitch: $0.doubleValue) } } }
+        interval = pacer.next(pose, at: t, fast: fast)
+        guard let pose else { return }
+        DispatchQueue.main.async { self.onPose(pose.yaw, pose.pitch) }
     }
 }
 
@@ -695,6 +715,12 @@ func selftest() {
     precondition(nearest(yaw: 0.7, pitch: 0, a, reach: awayReach) == 2)       // right screen's edge: still 2
     precondition(setupKey([3, 1, 2]) == setupKey([2, 3, 1]))
     precondition(string(from: color(from: "1.0 0.5 0.0 0.75")) == "1.0 0.5 0.0 0.75") // color survives storage
+    var pc = Pacer()
+    precondition(pc.next((0, 0), at: 0, fast: 0.1) == 0.1)         // first face: fast
+    precondition(pc.next((0.01, 0), at: 1, fast: 0.1) == 0.1)      // still, but not for 2 s yet
+    precondition(pc.next((0.01, 0), at: 2.5, fast: 0.1) == Pacer.slow) // still for 2.5 s: slow
+    precondition(pc.next(nil, at: 5, fast: 0.1) == Pacer.slow)     // no face: stays slow
+    precondition(pc.next((0.4, 0), at: 6, fast: 0.1) == 0.1)       // head turns: fast again
     let dwell = 0.6
     var d = Debouncer()
     precondition(d.feed(1, at: 0, dwell: dwell) == nil)          // not long enough yet
