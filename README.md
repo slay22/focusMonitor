@@ -1,5 +1,7 @@
 # focusMonitor
 
+[![CI](https://github.com/slay22/focusMonitor/actions/workflows/ci.yml/badge.svg)](https://github.com/slay22/focusMonitor/actions/workflows/ci.yml)
+
 Look at a monitor, and its front window gets focus.
 
 A macOS menu bar app that uses a webcam (built-in or external) to see which monitor your head is turned
@@ -8,49 +10,93 @@ editor on the right, and keep typing. No click or Cmd-Tab needed.
 
 ## Features
 
+**Focus that follows your head**
 - **Head tracking** with Apple's Vision framework, all on-device. Video never leaves your Mac.
 - **Window-level focus**: only the window on the watched screen comes forward. Other windows of the
   same app on other screens stay where they are.
-- **Typing & mouse guards**: glancing at another screen while typing, or while using the mouse, doesn't steal focus.
+- **Pointer follows** (optional): the mouse pointer jumps back to where it was on the newly focused screen.
+- **Focus glow**: a short colored frame on the screen that just got focus (color and fade configurable).
+
+**No accidental switches**
+- **Typing & mouse guards**: glancing at another screen while typing or using the mouse doesn't steal focus.
 - **Switch margin**: with your head between two screens, nothing switches until it's clear which one you face.
-- **Look away freely**: turn to a colleague or leave the desk, and focus stays where it was.
-- **Pointer follows** (optional): the mouse pointer jumps to where it was on the newly focused screen.
-- **Power aware**: slows down while your head is still or you're away, and analyzes half as often on battery
-  or in Low Power Mode.
+- **Look away freely**: turn to a colleague, look out the window or leave the desk, and focus stays where it was.
+- **App rules**: never switch away from some apps (games, presentations), never focus others (dashboards).
+
+**Fits your day**
 - **Profiles per monitor setup** (home, office, …). Each set of connected monitors gets its own
   calibration and camera, and the right profile is picked automatically when you plug in.
-- **Auto-pause** (camera off) with only one display (laptop-only in a meeting), during video calls,
-  and while the screen is locked or asleep. The camera restarts after sleep and falls back if unplugged.
-- **App rules**: never switch away from some apps (games, presentations), never focus others (dashboards).
+- **Auto-pause** (camera off): with only one display (laptop-only in a meeting), during video calls,
+  and while the screen is locked or asleep.
+- **Camera recovery**: restarts after sleep, falls back to another camera if yours is unplugged, and
+  switches back when it returns.
+- **Power aware**: slows down while your head is still or you're away, and analyzes half as often on
+  battery or in Low Power Mode.
 - **Pause / resume** from the menu or with **⌃⌥⌘P** from anywhere.
-- **Focus glow**: a short colored frame on the screen that just got focus (color and fade configurable).
-- **Settings**: live "facing" readout, permission status, launch at login, camera, delays, guards, glow,
-  recalibration, live log.
+- **Launch at login**.
 
 ## Install
 
 Needs macOS 14+ and the Xcode Command Line Tools (`xcode-select --install`).
 
 ```sh
+git clone https://github.com/slay22/focusMonitor.git && cd focusMonitor
 ./make-cert.sh   # once: self-signed signing identity, so permissions survive rebuilds
 ./build.sh && open focusMonitor.app
 ```
 
-On first launch, grant **Camera** and **Accessibility** in System Settings → Privacy & Security
-(Settings → Status shows both, with buttons to the right pane).
-Calibration starts automatically: look at each screen as the 👁 panel appears on it.
+On first launch, grant **Camera** and **Accessibility** in System Settings → Privacy & Security.
+Settings → Status shows both, with a button to the right pane if one is missing.
 
 > Without `make-cert.sh` the app is ad-hoc signed, and macOS forgets the Accessibility grant after
 > every rebuild. To use your own certificate instead: `SIGN_ID="My Cert" ./build.sh`.
 
+## Usage
+
+**Calibration** starts automatically for every new monitor setup. A "👁 Look at this screen" panel appears
+on each screen in turn: turn your head toward it and hold still until it moves on. VoiceOver also
+reads out which screen is next. Recalibrate from the menu whenever you move the camera or your monitors.
+
+**Menu bar 👁**
+- Green eye: tracking. Eye with a slash: paused (the tooltip says why).
+- **Watching: \<screen\>**: the screen that has focus right now.
+- **Pause Tracking / Resume Tracking** (⌃⌥⌘P), **Recalibrate**, **Settings…**, **Quit**.
+
+**Settings**
+
+| Section | What's there |
+|---|---|
+| Status | Live **Facing** readout (screen, *between screens*, *looking away* + raw angles), Camera / Accessibility permission, Launch at login |
+| Tracking | Camera, switch delay, switch margin, mouse guard, pointer follows, pause during video calls, typing guard |
+| Glow | On/off, color (with opacity), fade time, Preview |
+| Calibration | Current monitor setup, Recalibrate |
+| App rules | *Never switch away from* / *Never focus* lists |
+| Log | Focus switches, status changes, calibration results, warnings |
+| About | Version, build commit, GitHub link |
+
+## Tips
+
+- **Camera placement**: anywhere works, since calibration records your head angle per screen *as seen
+  from that camera*. A camera in the middle of your monitors is best. With a camera at one side (e.g. the
+  laptop's built-in camera with the laptop on the left), the screen farthest away needs a big head turn.
+  If it's unreliable, angle the laptop slightly toward the middle.
+- **Check a setup** with Settings → Status → **Facing**: look at each screen and see what it reads.
+- **⚠️ "… look almost the same to the camera"** in the log means two screens can't be told apart:
+  turn your head more during calibration, or move the camera.
+- **Focus doesn't switch at all?** Check Settings → Status → Accessibility.
+- It follows your **head**, not your eyes: turn your head toward a monitor, don't just glance.
+
 ## How it works
 
-1. About 10×/s, Vision detects your face and its yaw and pitch (where your head is pointing).
-2. The closest calibrated screen wins once you've faced it for the switch delay (default 0.6 s).
-3. The topmost normal window on that screen is raised and activated, the way a click would.
+1. Vision detects your face and its yaw and pitch (where your head points): ~7×/s while you move,
+   ~2.5×/s while you're still or away, half that on battery.
+2. The nearest calibrated screen wins if it's clearly closer than the runner-up (switch margin) and
+   within ~29° (otherwise you're looking away). Typing, mouse use and app rules can hold focus.
+3. Once you've faced the new screen for the switch delay (default 0.6 s), its topmost normal window is
+   raised and activated, the way a click would.
 
-It follows your **head**, not your eyes: turn your head toward a monitor, don't just glance.
-Calibration lives in `~/.focusmonitor.json`.
+CPU: ~5–9 % of one core while tracking (most of it is the camera feed itself), 0 % when paused.
+Profiles and calibration live in `~/.focusmonitor.json`, settings in the `local.focusMonitor` defaults.
 
 ## Development
 
@@ -61,4 +107,5 @@ Everything is in `focusMonitor.swift`. `icon.swift` draws the app icon (delete `
 focusMonitor.app/Contents/MacOS/focusMonitor selftest
 ```
 
-See [AGENTS.md](AGENTS.md) for the non-obvious parts.
+CI builds and runs the self-test on every push. Ideas and plans are in [TODO.md](TODO.md); see
+[AGENTS.md](AGENTS.md) for the non-obvious parts.
