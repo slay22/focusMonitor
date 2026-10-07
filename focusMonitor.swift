@@ -536,6 +536,8 @@ final class App: NSObject, NSApplicationDelegate {
                 Text("Look at this screen").font(.largeTitle.bold())
                 Text("Hold still a moment, it moves on by itself.").font(.title3).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, maxHeight: .infinity))
+        // Position again after init: init alone may clamp the panel onto another screen (seen on SMB2440MH).
+        panel.setFrameOrigin(CGPoint(x: f.midX - 260, y: f.midY - 170))
         panel.orderFrontRegardless()
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [
             .announcement: "Look at \(s.screen.localizedName)", .priority: NSAccessibilityPriorityLevel.high.rawValue])
