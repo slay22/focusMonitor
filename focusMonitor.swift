@@ -304,7 +304,7 @@ func string(from c: Color) -> String {
 
 // MARK: Flash effects on the screen that gets focus.
 
-let flashEffects = ["Fade", "Pulse", "Ripple", "Orbit", "Dissolve", "Explode", "Splash", "Random"]
+let flashEffects = ["Fade", "Pulse", "Ripple", "Orbit", "Dissolve", "Explode", "Splash", "Fireworks", "Random"]
 let flashHold = 0.4 // "Fade" stays solid this long before fading
 
 /// Point at fraction u (0...1, clockwise from top-left) along the border of `size`, inset by `inset`.
@@ -394,6 +394,30 @@ struct Flash: View {
                         guard y <= c.y + 4 else { continue } // back in the water
                         let r = 3 + 6 * rnd(i, 7)
                         ctx.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: 2 * r, height: 2 * r)), with: .color(color))
+                    }
+                case "Fireworks": // rockets rise from the bottom and burst into falling, twinkling sparks
+                    for j in 0..<5 {
+                        let launch = Double(j) * 0.1, rise = 0.25, life = 1 - launch - rise
+                        let x0 = size.width * (0.15 + 0.7 * rnd(j, 8)), top = size.height * (0.15 + 0.3 * rnd(j, 9))
+                        guard t > launch else { continue }
+                        if t < launch + rise { // rocket with a short trail, slowing as it climbs
+                            let f = (t - launch) / rise, y = size.height - (size.height - top) * (1 - (1 - f) * (1 - f))
+                            var p = Path(); p.move(to: CGPoint(x: x0, y: y)); p.addLine(to: CGPoint(x: x0, y: y + 30))
+                            ctx.stroke(p, with: .color(color), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                            continue
+                        }
+                        let b = (t - launch - rise) / life, bs = b * life * duration // burst progress, seconds
+                        let hue = Color(hue: rnd(j, 10), saturation: 0.6, brightness: 1)
+                        func at(_ i: Int, _ s: Double) -> CGPoint {
+                            let ang = 2 * .pi * (Double(i) + rnd(i, j)) / 48, v = 220 + 200 * rnd(i, j + 20)
+                            return CGPoint(x: x0 + cos(ang) * v * s, y: top + sin(ang) * v * s + 140 * s * s)
+                        }
+                        for i in 0..<48 {
+                            let twinkle = rnd(i, Int(e * 25) + j * 1000) > 0.25 ? 1.0 : 0.3
+                            var p = Path(); p.move(to: at(i, max(0, bs - 0.06))); p.addLine(to: at(i, bs))
+                            ctx.stroke(p, with: .color((i % 3 == 0 ? hue : color).opacity((1 - b) * twinkle)),
+                                       style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        }
                     }
                 default: // "Fade"
                     ctx.opacity = 1 - max(0, min(1, (e - flashHold) / duration))
@@ -789,7 +813,7 @@ final class App: NSObject, NSApplicationDelegate {
         w.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         var effect = defaults.string(forKey: "glowEffect") ?? "Fade"
         if effect == "Random" { effect = flashEffects.dropLast().randomElement()! }
-        let duration = defaults.double(forKey: "glowFade")
+        let duration = max(defaults.double(forKey: "glowFade"), effect == "Fireworks" ? 2 : 0) // ponytail: fireworks need time to burst
         w.contentView = NSHostingView(rootView: Flash(effect: effect, color: color(from: defaults.string(forKey: "glowColor") ?? ""), duration: duration))
         w.setFrame(screen.frame, display: true)
         w.orderFrontRegardless()

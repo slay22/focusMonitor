@@ -16,7 +16,7 @@ editor on the right, and keep typing. No click or Cmd-Tab needed.
   same app on other screens stay where they are.
 - **Pointer follows** (optional): the mouse pointer jumps back to where it was on the newly focused screen.
 - **Focus flash**: a short colored frame on the screen that just got focus, with effects: Fade, Pulse,
-  Ripple, Orbit, Dissolve, Explode, Splash or Random (color and duration configurable).
+  Ripple, Orbit, Dissolve, Explode, Splash, Fireworks or Random (color and duration configurable).
 
 **No accidental switches**
 - **Typing & mouse guards**: glancing at another screen while typing or using the mouse doesn't steal focus.
