@@ -18,6 +18,7 @@ func sampleInterval() -> TimeInterval {
 // Head turned further than this (radians, ~29°) from every calibrated screen = looking away: focus stays.
 // A fixed angle, not relative to screen spacing: a tight calibration must not make every glance "away".
 let awayReach = 0.5
+let welcomeAfter: TimeInterval = 180 // ponytail: fixed 3 min without a face counts as "away"; a slider if people want it
 let calibFile = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".focusmonitor.json")
 
 // MARK: - Log (shown in the Settings window)
@@ -324,12 +325,13 @@ func rnd(_ i: Int, _ k: Int) -> Double {
 
 struct Flash: View {
     let effect: String, color: Color, duration: Double
+    var message: String? = nil
     let start = Date()
 
     var body: some View {
         TimelineView(.animation) { tl in
+            let e = tl.date.timeIntervalSince(start), t = min(1, e / duration)
             Canvas { ctx, size in
-                let e = tl.date.timeIntervalSince(start), t = min(1, e / duration)
                 let frame = Path(CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4))
                 switch effect {
                 case "Pulse": // three heartbeats, dying out
@@ -424,6 +426,12 @@ struct Flash: View {
                     ctx.stroke(frame, with: .color(color), lineWidth: 8)
                 }
             }
+            .overlay {
+                if let message {
+                    Text(message).font(.system(size: 72, weight: .heavy, design: .rounded)).foregroundStyle(.white)
+                        .shadow(color: color, radius: 16).opacity(min(1, e * 3) * min(1, (1 - t) * 3))
+                }
+            }
         }
     }
 }
@@ -441,6 +449,7 @@ struct SettingsView: View {
     @AppStorage("glowColor") var glowColor = ""
     @AppStorage("glowFade") var glowFade = 0.8
     @AppStorage("glowEffect") var glowEffect = "Fade"
+    @AppStorage("welcome") var welcome = true
     @ObservedObject var log = Log.shared
     @ObservedObject var live = Live.shared
     let onCameraChange: (String) -> Void
@@ -496,6 +505,7 @@ struct SettingsView: View {
                 }
                 LabeledContent("") { Button("Preview", action: onPreviewGlow) }
             }.disabled(!glow)
+            Toggle("Welcome me back with fireworks (after 3+ min away)", isOn: $welcome)
             LabeledContent("Calibration") {
                 Text(screens().map(\.screen.localizedName).joined(separator: " + ")).foregroundStyle(.secondary)
                 Button("Recalibrate…", action: onRecalibrate)
@@ -592,6 +602,9 @@ final class App: NSObject, NSApplicationDelegate {
     var glow: NSWindow?
     var pointerSpots: [CGDirectDisplayID: CGPoint] = [:]
     var pausedBy: Set<String> = [] // automatic pauses: "in a call", "screen locked", "screen asleep"
+    // Welcome back: away = screen locked/asleep, or no face for `welcomeAfter` while the camera ran.
+    var lastFace = ProcessInfo.processInfo.systemUptime
+    var away = false
     var deb = Debouncer()
     var settingsWindow: NSWindow?
     // Calibration in progress: screens still to do, results so far, current screen's samples.
@@ -651,6 +664,7 @@ final class App: NSObject, NSApplicationDelegate {
         // Lock / display sleep pause tracking; waking from sleep restarts the camera (sessions can stall over sleep).
         let pauseOn = { [unowned self] (reason: String, on: Bool) in
             if on { pausedBy.insert(reason) } else { pausedBy.remove(reason) }
+            if on && reason.hasPrefix("screen") { away = true }
             refresh()
         }
         let dnc = DistributedNotificationCenter.default()
@@ -665,6 +679,7 @@ final class App: NSObject, NSApplicationDelegate {
             let own = self.tracker.wantsRunning ? defaults.string(forKey: "camera") : nil
             let inCall = defaults.bool(forKey: "pauseInCalls") && otherAppUsingCameraOrMic(ownCamera: own)
             if inCall != self.pausedBy.contains("in a call") { pauseOn("in a call", inCall) }
+            if self.tracker.wantsRunning && ProcessInfo.processInfo.systemUptime - self.lastFace > welcomeAfter { self.away = true }
         }
     }
 
@@ -717,7 +732,10 @@ final class App: NSObject, NSApplicationDelegate {
         status.button?.toolTip = "focusMonitor: " + state
         if !tracking { watching.title = "Watching: –" }
         status.menu?.item(at: 2)?.title = on ? "Pause Tracking" : "Resume Tracking"
-        tracker.setRunning(tracking || !calibQueue.isEmpty) // camera light off when not tracking
+        let run = tracking || !calibQueue.isEmpty
+        // Camera was off for a call or a manual pause: you were here, that time doesn't count as away.
+        if run && !tracker.wantsRunning && !away { lastFace = ProcessInfo.processInfo.systemUptime }
+        tracker.setRunning(run) // camera light off when not tracking
     }
 
     @objc func toggle() {
@@ -759,6 +777,10 @@ final class App: NSObject, NSApplicationDelegate {
             if calibSamples != nil { calibrationSample(yaw, pitch) }
             return
         }
+        let now = ProcessInfo.processInfo.systemUptime
+        if away && now - lastFace > welcomeAfter && defaults.bool(forKey: "welcome") { welcome(yaw: yaw, pitch: pitch) }
+        away = false
+        lastFace = now
         guard defaults.bool(forKey: "enabled"), screens().count > 1 else { return }
         // Glancing at another screen while writing must not steal focus. Reset the dwell so it
         // only counts once you've stopped typing.
@@ -803,6 +825,21 @@ final class App: NSObject, NSApplicationDelegate {
     /// Brief colored frame around the screen focus just moved to, animated by `Flash`; click-through.
     func glow(_ screen: NSScreen) {
         glow?.close()
+        var effect = defaults.string(forKey: "glowEffect") ?? "Fade"
+        if effect == "Random" { effect = flashEffects.dropLast().randomElement()! }
+        let duration = max(defaults.double(forKey: "glowFade"), effect == "Fireworks" ? 2 : 0) // ponytail: fireworks need time to burst
+        glow = flash(screen, effect: effect, duration: duration)
+    }
+
+    /// 🎆 Easter egg: fireworks on the screen you face when you're back after a while.
+    func welcome(yaw: Double, pitch: Double) {
+        log("👋 Welcome back")
+        let d = nearest(yaw: yaw, pitch: pitch, profile?.anchors ?? [])
+        guard let screen = screens().first(where: { $0.id == d })?.screen ?? NSScreen.main else { return }
+        _ = flash(screen, effect: "Fireworks", duration: 3, message: "Welcome back!") // not `glow`: a focus flash mustn't cut it short
+    }
+
+    func flash(_ screen: NSScreen, effect: String, duration: Double, message: String? = nil) -> NSWindow {
         let w = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
         w.isOpaque = false
         w.backgroundColor = .clear
@@ -811,14 +848,12 @@ final class App: NSObject, NSApplicationDelegate {
         w.isReleasedWhenClosed = false
         w.level = .screenSaver // above everything, and not layer 0 so focusFrontWindow never picks it
         w.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
-        var effect = defaults.string(forKey: "glowEffect") ?? "Fade"
-        if effect == "Random" { effect = flashEffects.dropLast().randomElement()! }
-        let duration = max(defaults.double(forKey: "glowFade"), effect == "Fireworks" ? 2 : 0) // ponytail: fireworks need time to burst
-        w.contentView = NSHostingView(rootView: Flash(effect: effect, color: color(from: defaults.string(forKey: "glowColor") ?? ""), duration: duration))
+        w.contentView = NSHostingView(rootView: Flash(effect: effect, color: color(from: defaults.string(forKey: "glowColor") ?? ""),
+                                                      duration: duration, message: message))
         w.setFrame(screen.frame, display: true)
         w.orderFrontRegardless()
-        glow = w
         DispatchQueue.main.asyncAfter(deadline: .now() + duration + (effect == "Fade" ? flashHold : 0)) { w.close() }
+        return w
     }
 
     // MARK: Calibration: a panel on each screen in turn; look at it until it moves on.
@@ -925,7 +960,7 @@ func selftest() {
 }
 
 if CommandLine.arguments.contains("selftest") { selftest(); exit(0) }
-defaults.register(defaults: ["dwell": 0.6, "typingGrace": 2.0, "enabled": true, "glow": true, "glowColor": "0.2 0.78 0.35 0.8", "glowFade": 0.8, "glowEffect": "Fade",
+defaults.register(defaults: ["dwell": 0.6, "typingGrace": 2.0, "enabled": true, "glow": true, "glowColor": "0.2 0.78 0.35 0.8", "glowFade": 0.8, "glowEffect": "Fade", "welcome": true,
                                     "margin": 0.3, "mouseGrace": 1.0, "movePointer": false, "pauseInCalls": true])
 let delegate = App()
 NSApplication.shared.delegate = delegate

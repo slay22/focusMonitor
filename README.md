@@ -36,6 +36,8 @@ editor on the right, and keep typing. No click or Cmd-Tab needed.
   battery or in Low Power Mode.
 - **Pause / resume** from the menu or with **⌃⌥⌘P** from anywhere.
 - **Launch at login**.
+- 🎆 **Welcome back**: come back after 3+ minutes away (or unlock your Mac) and the screen you face
+  greets you with fireworks. Can be turned off.
 
 ## Install
 
@@ -70,7 +72,7 @@ reads out which screen is next. Recalibrate from the menu whenever you move the 
 |---|---|
 | Status | Live **Facing** readout (screen, *between screens*, *looking away* + raw angles), Camera / Accessibility permission, Launch at login |
 | Tracking | Camera, switch delay, switch margin, mouse guard, pointer follows, pause during video calls, typing guard |
-| Glow | On/off, effect, color (with opacity), duration, Preview |
+| Glow | On/off, effect, color (with opacity), duration, Preview, welcome-back fireworks |
 | Calibration | Current monitor setup, Recalibrate |
 | App rules | *Never switch away from* / *Never focus* lists |
 | Log | Focus switches, status changes, calibration results, warnings |
