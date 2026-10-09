@@ -3,6 +3,7 @@ import AVFoundation
 import CoreAudio
 import CoreMediaIO
 import IOKit.ps
+import IOKit.pwr_mgt
 import ServiceManagement
 import SwiftUI
 import Vision
@@ -478,6 +479,8 @@ struct SettingsView: View {
     @AppStorage("margin") var margin = 0.3
     @AppStorage("movePointer") var movePointer = false
     @AppStorage("pauseInCalls") var pauseInCalls = true
+    @AppStorage("keepAwake") var keepAwake = true
+    @AppStorage("awakeGrace") var awakeGrace = 0.0
     @AppStorage("glow") var glow = true
     @AppStorage("glowColor") var glowColor = ""
     @AppStorage("glowFade") var glowFade = 0.8
@@ -526,6 +529,11 @@ struct SettingsView: View {
             }
             Toggle("Move the mouse pointer to the focused screen", isOn: $movePointer)
             Toggle("Pause during calls (another app uses the microphone or a camera)", isOn: $pauseInCalls)
+            Toggle("Keep the Mac awake while I'm at the desk", isOn: $keepAwake)
+            LabeledContent("…and after I leave for") {
+                Slider(value: $awakeGrace, in: 0...15, step: 1)
+                Text(awakeGrace == 0 ? "off" : "\(Int(awakeGrace)) min").monospacedDigit().frame(width: 44)
+            }.disabled(!keepAwake)
             LabeledContent("Pause after typing for") {
                 Slider(value: $typingGrace, in: 0...5, step: 0.5)
                 Text(typingGrace == 0 ? "off" : String(format: "%.1f s", typingGrace)).monospacedDigit().frame(width: 44)
@@ -644,6 +652,7 @@ final class App: NSObject, NSApplicationDelegate {
     // Welcome back: away = screen locked/asleep, or no face for `welcomeAfter` while the camera ran.
     var lastFace = ProcessInfo.processInfo.systemUptime
     var away = false
+    var awakeID = IOPMAssertionID(0)
     var sound: AVAudioEngine? // kept alive while the welcome sound plays
     var deb = Debouncer()
     var settingsWindow: NSWindow?
@@ -719,7 +728,13 @@ final class App: NSObject, NSApplicationDelegate {
             let own = self.tracker.wantsRunning ? defaults.string(forKey: "camera") : nil
             let inCall = defaults.bool(forKey: "pauseInCalls") && otherAppUsingCameraOrMic(ownCamera: own)
             if inCall != self.pausedBy.contains("in a call") { pauseOn("in a call", inCall) }
-            if self.tracker.wantsRunning && ProcessInfo.processInfo.systemUptime - self.lastFace > welcomeAfter { self.away = true }
+            let sinceFace = ProcessInfo.processInfo.systemUptime - self.lastFace
+            if self.tracker.wantsRunning && sinceFace > welcomeAfter { self.away = true }
+            // Keep awake: a face counts as user activity, so display sleep, screen saver and lock wait while you're
+            // there (reading, thinking). Once you leave, macOS's own timers run from the last face (+ grace).
+            if defaults.bool(forKey: "keepAwake") && self.tracker.wantsRunning && sinceFace < 10 + defaults.double(forKey: "awakeGrace") * 60 {
+                IOPMAssertionDeclareUserActivity("focusMonitor: you're at the desk" as CFString, kIOPMUserActiveLocal, &self.awakeID)
+            }
         }
     }
 
@@ -1019,7 +1034,7 @@ func selftest() {
 }
 
 if CommandLine.arguments.contains("selftest") { selftest(); exit(0) }
-defaults.register(defaults: ["dwell": 0.6, "typingGrace": 2.0, "enabled": true, "glow": true, "glowColor": "0.2 0.78 0.35 0.8", "glowFade": 0.8, "glowEffect": "Fade", "welcome": true, "welcomeSound": true,
+defaults.register(defaults: ["dwell": 0.6, "typingGrace": 2.0, "enabled": true, "glow": true, "glowColor": "0.2 0.78 0.35 0.8", "glowFade": 0.8, "glowEffect": "Fade", "welcome": true, "welcomeSound": true, "keepAwake": true, "awakeGrace": 0.0,
                                     "margin": 0.3, "mouseGrace": 1.0, "movePointer": false, "pauseInCalls": true])
 let delegate = App()
 NSApplication.shared.delegate = delegate

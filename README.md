@@ -35,6 +35,9 @@ editor on the right, and keep typing. No click or Cmd-Tab needed.
 - **Power aware**: slows down while your head is still or you're away, and analyzes half as often on
   battery or in Low Power Mode.
 - **Pause / resume** from the menu or with **⌃⌥⌘P** from anywhere.
+- **Keep awake while you're here**: as long as the camera sees you, the screen doesn't dim, sleep or lock,
+  even if you're just reading. Once you leave, macOS's normal sleep and lock timers take over (optional grace
+  time). Replaces apps like Amphetamine for the "don't lock on me while I'm sitting here" case.
 - **Launch at login**.
 - 🎆 **Welcome back**: come back after 3+ minutes away (or unlock your Mac) and the screen you face
   greets you with fireworks. Can be turned off.
@@ -71,7 +74,7 @@ reads out which screen is next. Recalibrate from the menu whenever you move the 
 | Section | What's there |
 |---|---|
 | Status | Live **Facing** readout (screen, *between screens*, *looking away* + raw angles), Camera / Accessibility permission, Launch at login |
-| Tracking | Camera, switch delay, switch margin, mouse guard, pointer follows, pause during video calls, typing guard |
+| Tracking | Camera, switch delay, switch margin, mouse guard, pointer follows, pause during video calls, keep awake (+ grace after leaving), typing guard |
 | Glow | On/off, effect, color (with opacity), duration, Preview, welcome-back fireworks |
 | Calibration | Current monitor setup, Recalibrate |
 | App rules | *Never switch away from* / *Never focus* lists |
