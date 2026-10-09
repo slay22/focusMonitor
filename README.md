@@ -93,6 +93,33 @@ reads out which screen is next. Recalibrate from the menu whenever you move the 
 - **Focus doesn't switch at all?** Check Settings → Status → Accessibility.
 - It follows your **head**, not your eyes: turn your head toward a monitor, don't just glance.
 
+### Replacing Amphetamine (or similar keep-awake apps)
+
+Keep-awake apps hold your Mac awake and unlocked even when you've left. focusMonitor keeps the **screen** on
+only while you're at the desk. Once you leave, macOS's normal sleep and lock timers take over. Add these
+for the rest:
+
+- **Agents keep working while you're away.** The screen locks, but a locked Mac still runs everything.
+  The Mac only has to be kept from *sleeping*:
+  - **Claude Code** does that on its own while it works.
+  - **Codex**: turn on the experimental option "Prevent sleep while running" (`/experimental`, or
+    `prevent_idle_sleep = true` under `[features]` in `~/.codex/config.toml`).
+  - **Anything else** (pi, opencode, gemini, long builds): start it with macOS's `caffeinate -i`, e.g. in
+    `~/.zshrc`:
+    ```sh
+    alias pi='caffeinate -i pi'
+    ```
+    The Mac stays awake while the command is open (even idle), and normal sleep returns when you quit it.
+  - Check who's keeping the Mac awake with `pmset -g assertions`.
+- **Closing the lid** sleeps the Mac no matter what, *unless* it's on power with an external display
+  connected (clamshell mode). Your desk setup keeps running, a laptop in a bag doesn't. Agents resume
+  when you open the lid; a request in flight may need a retry.
+- **Back in without typing your password**: unlock with Apple Watch (System Settings → Touch ID &
+  Password) or Touch ID. Or set Lock Screen → "Require password after …" to a few minutes, so short
+  breaks wake straight to the desktop.
+- **Short breaks without the screen sleeping**: use the *…and after I leave for* slider next to
+  *Keep the Mac awake while I'm at the desk* in Settings.
+
 ## How it works
 
 1. Vision detects your face and its yaw and pitch (where your head points): ~7×/s while you move,
