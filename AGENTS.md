@@ -28,12 +28,15 @@ macOS menu bar app (Swift, AppKit + SwiftUI + Vision). Webcam head pose → whic
   Instead, polled every 3 s: CoreAudio per-process `kAudioProcessPropertyIsRunningInput` (any other process on a mic,
   macOS 14.2+) or CoreMediaIO `kCMIODevicePropertyDeviceIsRunningSomewhere` for any camera except our own. Our own
   camera counts only while `tracker.wantsRunning` is false. Known gap: another app on our camera without a mic.
+- Keep awake = `IOPMAssertionDeclareUserActivity` every 3 s while a face was seen recently (shows as `UserIsActive` in
+  `pmset -g assertions`). It postpones display sleep/lock by the user's own timeout and does *not* reset
+  `CGEventSource.secondsSinceLastEventType`, so the typing/mouse guards are unaffected (checked).
 - Head pose, not eye gaze: `VNDetectFaceRectanglesRequest` revision 3 yaw/pitch, nearest calibrated anchor.
 - Profiles are keyed by the sorted set of connected `CGDirectDisplayID`s (stable per monitor: vendor/model/serial).
   `~/.focusmonitor.json` is `[setupKey: Profile]`. `loadProfiles()` still reads the old `[Anchor]` format.
 - Overlay windows (glow, calibration panel) must not be at window layer 0, or `focusFrontWindow` would pick them.
 - Settings live in `UserDefaults` (`local.focusMonitor`): `enabled`, `pauseInCalls`, `keepFocus` / `neverFocus` (comma-separated bundle IDs), `dwell`, `typingGrace`, `mouseGrace`, `margin`, `movePointer`, `camera`, `glow`,
-  `glowColor` ("r g b a" sRGB), `glowFade` (effect duration), `glowEffect` (one of `flashEffects`), `welcome`. Defaults are registered at the bottom of `focusMonitor.swift`.
+  `glowColor` ("r g b a" sRGB), `glowFade` (effect duration), `glowEffect` (one of `flashEffects`), `welcome`, `welcomeSound`, `keepAwake`, `awakeGrace` (minutes). Defaults are registered at the bottom of `focusMonitor.swift`.
 
 ## Style
 
