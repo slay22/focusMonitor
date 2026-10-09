@@ -323,6 +323,39 @@ func rnd(_ i: Int, _ k: Int) -> Double {
     return x - x.rounded(.down)
 }
 
+/// Synthesized to match `Flash` "Fireworks": per rocket a rising whistle, then a bang and crackle, panned to where it bursts.
+func fireworksSound(duration: Double, rate: Double = 44100) -> AVAudioPCMBuffer {
+    let n = Int((duration + 1.5) * rate)
+    let buf = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)!, frameCapacity: AVAudioFrameCount(n))!
+    buf.frameLength = AVAudioFrameCount(n)
+    let l = buf.floatChannelData![0], r = buf.floatChannelData![1]
+    func add(_ i: Int, _ v: Double, pan: Double) { if i < n { l[i] += Float(v * (1 - pan)); r[i] += Float(v * pan) } }
+    for j in 0..<5 {
+        let pan = 0.15 + 0.7 * rnd(j, 8) // same x as the rocket in `Flash`
+        let launch = Int(Double(j) * 0.1 * duration * rate), rise = Int(0.25 * duration * rate)
+        var phase = 0.0
+        for k in 0..<rise { // whistle, gliding up
+            let f = Double(k) / Double(rise)
+            phase += 2 * .pi * (900 + 1400 * f) / rate
+            add(launch + k, sin(phase) * 0.04 * sin(.pi * f), pan: pan)
+        }
+        var lp = 0.0
+        for k in 0..<Int(0.7 * rate) { // bang: low-passed noise burst + a thump
+            let t = Double(k) / rate
+            lp += 0.3 * (Double.random(in: -1...1) - lp)
+            add(launch + rise + k, lp * 1.8 * exp(-t * 8) + sin(2 * .pi * 55 * t) * 0.6 * exp(-t * 12), pan: pan)
+        }
+        for _ in 0..<90 { // crackle: sparse clicks, thinning out
+            let t = 0.12 + pow(Double.random(in: 0...1), 1.6) * 1.1, start = launch + rise + Int(t * rate)
+            let p = min(1, max(0, pan + Double.random(in: -0.2...0.2)))
+            for k in 0..<60 { add(start + k, Double.random(in: -1...1) * 0.35 * (1 - t / 1.3) * exp(-Double(k) / 10), pan: p) }
+        }
+    }
+    let peak = (0..<n).map { max(abs(l[$0]), abs(r[$0])) }.max() ?? 1
+    for i in 0..<n { l[i] *= 0.8 / peak; r[i] *= 0.8 / peak }
+    return buf
+}
+
 struct Flash: View {
     let effect: String, color: Color, duration: Double
     var message: String? = nil
@@ -450,11 +483,13 @@ struct SettingsView: View {
     @AppStorage("glowFade") var glowFade = 0.8
     @AppStorage("glowEffect") var glowEffect = "Fade"
     @AppStorage("welcome") var welcome = true
+    @AppStorage("welcomeSound") var welcomeSound = true
     @ObservedObject var log = Log.shared
     @ObservedObject var live = Live.shared
     let onCameraChange: (String) -> Void
     let onRecalibrate: () -> Void
     let onPreviewGlow: () -> Void
+    let onPreviewWelcome: () -> Void
 
     var body: some View {
         Form {
@@ -506,6 +541,10 @@ struct SettingsView: View {
                 LabeledContent("") { Button("Preview", action: onPreviewGlow) }
             }.disabled(!glow)
             Toggle("Welcome me back with fireworks (after 3+ min away)", isOn: $welcome)
+            Group {
+                Toggle("With sound", isOn: $welcomeSound)
+                LabeledContent("") { Button("Preview", action: onPreviewWelcome) }
+            }.disabled(!welcome)
             LabeledContent("Calibration") {
                 Text(screens().map(\.screen.localizedName).joined(separator: " + ")).foregroundStyle(.secondary)
                 Button("Recalibrate…", action: onRecalibrate)
@@ -605,6 +644,7 @@ final class App: NSObject, NSApplicationDelegate {
     // Welcome back: away = screen locked/asleep, or no face for `welcomeAfter` while the camera ran.
     var lastFace = ProcessInfo.processInfo.systemUptime
     var away = false
+    var sound: AVAudioEngine? // kept alive while the welcome sound plays
     var deb = Debouncer()
     var settingsWindow: NSWindow?
     // Calibration in progress: screens still to do, results so far, current screen's samples.
@@ -749,7 +789,8 @@ final class App: NSObject, NSApplicationDelegate {
                 tracker.use(cameraID: id)
                 recalibrate() // other camera, other angles
             }, onRecalibrate: { [unowned self] in recalibrate() },
-               onPreviewGlow: { [unowned self] in if let s = settingsWindow?.screen { glow(s) } })
+               onPreviewGlow: { [unowned self] in if let s = settingsWindow?.screen { glow(s) } },
+               onPreviewWelcome: { [unowned self] in if let s = settingsWindow?.screen { welcome(on: s) } })
             let w = NSWindow(contentViewController: NSHostingController(rootView: view))
             w.title = "focusMonitor Settings"
             w.isReleasedWhenClosed = false
@@ -835,8 +876,23 @@ final class App: NSObject, NSApplicationDelegate {
     func welcome(yaw: Double, pitch: Double) {
         log("👋 Welcome back")
         let d = nearest(yaw: yaw, pitch: pitch, profile?.anchors ?? [])
-        guard let screen = screens().first(where: { $0.id == d })?.screen ?? NSScreen.main else { return }
+        if let screen = screens().first(where: { $0.id == d })?.screen ?? NSScreen.main { welcome(on: screen) }
+    }
+
+    func welcome(on screen: NSScreen) {
         _ = flash(screen, effect: "Fireworks", duration: 3, message: "Welcome back!") // not `glow`: a focus flash mustn't cut it short
+        guard defaults.bool(forKey: "welcomeSound") else { return }
+        let buf = fireworksSound(duration: 3), engine = AVAudioEngine(), player = AVAudioPlayerNode()
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: buf.format)
+        do { try engine.start() } catch { return log("⚠️ No sound: \(error.localizedDescription)") }
+        player.scheduleBuffer(buf)
+        player.play()
+        sound = engine
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double(buf.frameLength) / buf.format.sampleRate) { [weak self] in
+            engine.stop()
+            if self?.sound === engine { self?.sound = nil }
+        }
     }
 
     func flash(_ screen: NSScreen, effect: String, duration: Double, message: String? = nil) -> NSWindow {
@@ -956,11 +1012,14 @@ func selftest() {
     precondition(d.feed(1, at: 10.1, dwell: dwell) == nil)       // …back: no switch, still on 1
     precondition(d.feed(2, at: 20, dwell: dwell) == nil)
     precondition(d.feed(2, at: 20 + dwell, dwell: dwell) == 2)
+    let fw = fireworksSound(duration: 3)
+    let fwPeak = (0..<Int(fw.frameLength)).map { abs(fw.floatChannelData![0][$0]) }.max()!
+    precondition(fw.frameLength == 198450 && fwPeak > 0.3 && fwPeak <= 0.8) // normalized, no clipping
     print("selftest ok")
 }
 
 if CommandLine.arguments.contains("selftest") { selftest(); exit(0) }
-defaults.register(defaults: ["dwell": 0.6, "typingGrace": 2.0, "enabled": true, "glow": true, "glowColor": "0.2 0.78 0.35 0.8", "glowFade": 0.8, "glowEffect": "Fade", "welcome": true,
+defaults.register(defaults: ["dwell": 0.6, "typingGrace": 2.0, "enabled": true, "glow": true, "glowColor": "0.2 0.78 0.35 0.8", "glowFade": 0.8, "glowEffect": "Fade", "welcome": true, "welcomeSound": true,
                                     "margin": 0.3, "mouseGrace": 1.0, "movePointer": false, "pauseInCalls": true])
 let delegate = App()
 NSApplication.shared.delegate = delegate
