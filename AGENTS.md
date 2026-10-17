@@ -28,6 +28,8 @@ macOS menu bar app (Swift, AppKit + SwiftUI + Vision). Webcam head pose → whic
   Instead, polled every 3 s: CoreAudio per-process `kAudioProcessPropertyIsRunningInput` (any other process on a mic,
   macOS 14.2+) or CoreMediaIO `kCMIODevicePropertyDeviceIsRunningSomewhere` for any camera except our own. Our own
   camera counts only while `tracker.wantsRunning` is false. Known gap: another app on our camera without a mic.
+  Processes under `/usr/`, `/System/Library/`, `/Library/Apple/` are ignored (`isSystemPath`): macOS 27's
+  `historicalaudiod` (with Siri on) keeps a mic open permanently and paused tracking 3 s after every launch.
 - Keep awake = `IOPMAssertionDeclareUserActivity` every 3 s while a face was seen recently (shows as `UserIsActive` in
   `pmset -g assertions`). It postpones display sleep/lock by the user's own timeout and does *not* reset
   `CGEventSource.secondsSinceLastEventType`, so the typing/mouse guards are unaffected (checked).

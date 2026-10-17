@@ -210,8 +210,20 @@ func micInUseByOthers() -> Bool {
     var procs = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
     AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, &size, &procs)
     return procs.contains { p in
-        get(p, kAudioProcessPropertyIsRunningInput) != 0 && pid_t(bitPattern: get(p, kAudioProcessPropertyPID)) != getpid()
+        let pid = pid_t(bitPattern: get(p, kAudioProcessPropertyPID))
+        return get(p, kAudioProcessPropertyIsRunningInput) != 0 && pid != getpid() && !isSystemDaemon(pid)
     }
+}
+
+/// macOS's own background processes (e.g. macOS 27's `historicalaudiod`, which keeps a mic open all the time,
+/// or Siri/dictation) aren't calls. Apps, including FaceTime in /System/Applications, are.
+func isSystemDaemon(_ pid: pid_t) -> Bool {
+    var buf = [CChar](repeating: 0, count: 4096)
+    guard proc_pidpath(pid, &buf, UInt32(buf.count)) > 0 else { return false }
+    return isSystemPath(String(cString: buf))
+}
+func isSystemPath(_ path: String) -> Bool {
+    ["/usr/", "/System/Library/", "/Library/Apple/"].contains { path.hasPrefix($0) }
 }
 
 /// In a call (or another app filming): a microphone in use, or a camera running that isn't ours.
@@ -1029,6 +1041,8 @@ func selftest() {
     precondition(d.feed(2, at: 20 + dwell, dwell: dwell) == 2)
     let fw = fireworksSound(duration: 3)
     let fwPeak = (0..<Int(fw.frameLength)).map { abs(fw.floatChannelData![0][$0]) }.max()!
+    precondition(isSystemPath("/usr/libexec/historicalaudiod") && isSystemPath("/System/Library/PrivateFrameworks/X.framework/x"))
+    precondition(!isSystemPath("/System/Applications/FaceTime.app/Contents/MacOS/FaceTime") && !isSystemPath("/Applications/zoom.us.app/x"))
     precondition(fw.frameLength == 198450 && fwPeak > 0.3 && fwPeak <= 0.8) // normalized, no clipping
     print("selftest ok")
 }
