@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import CoreAudio
 import CoreMediaIO
+import FoundationModels // weak-linked in build.sh: only used on macOS 26+
 import IOKit.ps
 import IOKit.pwr_mgt
 import ServiceManagement
@@ -43,6 +44,8 @@ final class Live: ObservableObject {
     static let shared = Live()
     @Published var facing = ""
     @Published var seen = Date.distantPast
+    @Published var why = ""       // "Why didn't it switch?" answer
+    @Published var asking = false
 }
 
 // MARK: - Gaze -> display
@@ -505,6 +508,7 @@ struct SettingsView: View {
     let onRecalibrate: () -> Void
     let onPreviewGlow: () -> Void
     let onPreviewWelcome: () -> Void
+    let onWhy: () async -> String
 
     var body: some View {
         Form {
@@ -574,6 +578,16 @@ struct SettingsView: View {
                 AppList("Never focus", key: "neverFocus")
             }
             Section("Log") {
+                if #available(macOS 26, *), SystemLanguageModel.default.isAvailable {
+                    HStack {
+                        Button(live.asking ? "Thinking…" : "Why didn't it switch?") {
+                            live.asking = true
+                            Task { live.why = await onWhy(); live.asking = false }
+                        }.disabled(live.asking)
+                        Text("Apple Intelligence, on-device").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if !live.why.isEmpty { Text(live.why).textSelection(.enabled) }
+                }
                 ScrollView {
                     Text(log.lines.joined(separator: "\n"))
                         .font(.caption.monospaced())
@@ -665,6 +679,7 @@ final class App: NSObject, NSApplicationDelegate {
     var lastFace = ProcessInfo.processInfo.systemUptime
     var away = false
     var awakeID = IOPMAssertionID(0)
+    var holds: [String] = []
     var sound: AVAudioEngine? // kept alive while the welcome sound plays
     var deb = Debouncer()
     var settingsWindow: NSWindow?
@@ -817,7 +832,8 @@ final class App: NSObject, NSApplicationDelegate {
                 recalibrate() // other camera, other angles
             }, onRecalibrate: { [unowned self] in recalibrate() },
                onPreviewGlow: { [unowned self] in if let s = settingsWindow?.screen { glow(s) } },
-               onPreviewWelcome: { [unowned self] in if let s = settingsWindow?.screen { welcome(on: s) } })
+               onPreviewWelcome: { [unowned self] in if let s = settingsWindow?.screen { welcome(on: s) } },
+               onWhy: { [unowned self] in if #available(macOS 26, *) { await explainWhy() } else { "" } })
             let w = NSWindow(contentViewController: NSHostingController(rootView: view))
             w.title = "focusMonitor Settings"
             w.isReleasedWhenClosed = false
@@ -830,13 +846,71 @@ final class App: NSObject, NSApplicationDelegate {
 
     /// "LG FHD", "between screens", "looking away" + raw angles, using the same rules as switching.
     func showFacing(yaw: Double, pitch: Double) {
-        let anchors = profile?.anchors ?? []
-        let name = { (id: CGDirectDisplayID) in screens().first { $0.id == id }?.screen.localizedName ?? "?" }
-        let verdict = anchors.isEmpty ? "not calibrated"
-            : nearest(yaw: yaw, pitch: pitch, anchors, reach: awayReach) == nil ? "looking away"
-            : nearest(yaw: yaw, pitch: pitch, anchors, margin: defaults.double(forKey: "margin")).map(name) ?? "between screens"
-        Live.shared.facing = String(format: "%@   (yaw %+.2f, pitch %+.2f)", verdict, yaw, pitch)
+        Live.shared.facing = String(format: "%@   (yaw %+.2f, pitch %+.2f)", verdict(yaw: yaw, pitch: pitch), yaw, pitch)
         Live.shared.seen = Date()
+    }
+
+    func verdict(yaw: Double, pitch: Double) -> String {
+        let anchors = profile?.anchors ?? []
+        return anchors.isEmpty ? "not calibrated"
+            : nearest(yaw: yaw, pitch: pitch, anchors, reach: awayReach) == nil ? "looking away"
+            : nearest(yaw: yaw, pitch: pitch, anchors, margin: defaults.double(forKey: "margin")).map(screenName) ?? "between screens"
+    }
+
+    func screenName(_ id: CGDirectDisplayID) -> String { screens().first { $0.id == id }?.screen.localizedName ?? "?" }
+
+    /// Timeline of why focus did or didn't move, for "Why didn't it switch?". Only changes are recorded.
+    func hold(_ why: String) {
+        guard holds.last?.hasSuffix("  " + why) != true else { return }
+        holds.append(Date().formatted(date: .omitted, time: .standard) + "  " + why)
+        if holds.count > 30 { holds.removeFirst() }
+    }
+
+    /// Asks Apple's on-device model to explain the recent decisions in plain words.
+    @available(macOS 26, *) @MainActor
+    func explainWhy() async -> String {
+        let anchors = profile?.anchors ?? []
+        var calib = anchors.map { String(format: "%@: yaw %+.2f, pitch %+.2f", screenName($0.display), $0.yaw, $0.pitch) }
+        for (i, a) in anchors.enumerated() { for b in anchors[(i + 1)...] {
+            calib.append(String(format: "distance %@ ↔ %@: %.2f%@", screenName(a.display), screenName(b.display),
+                                hypot(a.yaw - b.yaw, a.pitch - b.pitch), hypot(a.yaw - b.yaw, a.pitch - b.pitch) < 0.25 ? " (TOO CLOSE: hard to tell apart)" : ""))
+        } }
+        // The small on-device model weighs evidence poorly: count the hold reasons for it.
+        let kinds = holds.map { String($0.dropFirst(10).prefix { $0 != "(" && $0 != ":" }).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.hasPrefix("facing") }
+        let top = Dictionary(grouping: kinds, by: { $0 }).max { $0.value.count < $1.value.count }
+        let rules = (["keepFocus", "neverFocus"]).map { "\($0): \(defaults.string(forKey: $0) ?? "")" }.joined(separator: "; ")
+        let prompt = """
+        Status: \(status.button?.toolTip ?? "?")
+        Settings: switch delay \(defaults.double(forKey: "dwell")) s, typing guard \(defaults.double(forKey: "typingGrace")) s, \
+        mouse guard \(defaults.double(forKey: "mouseGrace")) s, switch margin \(defaults.double(forKey: "margin")), \(rules)
+        Calibration (head angles in radians per screen; looking away beyond \(awayReach) from every screen):
+        \(calib.isEmpty ? "none" : calib.joined(separator: "\n"))
+        Facing right now: \(Live.shared.facing.isEmpty ? "no face seen" : Live.shared.facing)
+        Most frequent reason focus was held: \(top.map { "\($0.key) (\($0.value.count) of \(holds.count) recent decisions)" } ?? "none")
+        Recent decisions (oldest first):
+        \(holds.joined(separator: "\n"))
+        Recent log (oldest first, "→ App on Screen" = a switch):
+        \(Log.shared.lines.prefix(25).reversed().joined(separator: "\n"))
+        """
+        let session = LanguageModelSession(instructions: """
+            You help the user of focusMonitor, a Mac app that watches their head with a webcam and focuses the front \
+            window of the screen they face. It switches only after they face a screen for the switch delay. It holds focus \
+            while they type (typing guard), while they use the mouse on another screen (mouse guard), while their head is \
+            between two screens (switch margin), when they look away from all screens, and while a keepFocus app is in front. \
+            It never focuses neverFocus apps. It pauses with one display, in calls, when locked or asleep. \
+            The user asks why focus didn't switch (or switched wrongly). Using only the data given, name the most likely \
+            reason (start from "Most frequent reason") and its fix: \
+            typing guard → stop typing a moment before turning, or lower "Pause after typing for"; \
+            mouse guard → lower the mouse guard; \
+            between screens or screens TOO CLOSE → recalibrate and turn your head fully toward each screen, or move the camera \
+            toward the middle; \
+            looking away → recalibrate; keepFocus app → remove it from "Never switch away from"; \
+            paused → the status says why. \
+            Answer in English, at most 3 short sentences.
+            """)
+        do { return try await session.respond(to: prompt).content }
+        catch { return "Couldn't get an answer: \(error.localizedDescription)" }
     }
 
     func pose(yaw: Double, pitch: Double) {
@@ -852,18 +926,22 @@ final class App: NSObject, NSApplicationDelegate {
         guard defaults.bool(forKey: "enabled"), screens().count > 1 else { return }
         // Glancing at another screen while writing must not steal focus. Reset the dwell so it
         // only counts once you've stopped typing.
+        let facing = verdict(yaw: yaw, pitch: pitch)
         if CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown) < defaults.double(forKey: "typingGrace") {
+            hold("typing guard held focus (facing \(facing))")
             deb.candidate = nil
             return
         }
         // Never switch away from listed apps (games, presentations, …).
-        if appRule("keepFocus").contains(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "") {
+        if let app = NSWorkspace.shared.frontmostApplication, appRule("keepFocus").contains(app.bundleIdentifier ?? "") {
+            hold("keepFocus app \(app.localizedName ?? "?") is in front (facing \(facing))")
             deb.candidate = nil
             return
         }
         // Head between two screens, or turned away from all of them: undecided, focus stays put and
         // the dwell starts over once it's clear again. (Leaving the desk = no face = no samples at all.)
         guard let d = nearest(yaw: yaw, pitch: pitch, profile?.anchors ?? [], margin: defaults.double(forKey: "margin"), reach: awayReach) else {
+            hold(facing)
             deb.candidate = nil
             return
         }
@@ -873,9 +951,11 @@ final class App: NSObject, NSApplicationDelegate {
         let mouseIdle = [CGEventType.mouseMoved, .leftMouseDragged, .rightMouseDragged, .leftMouseDown, .rightMouseDown, .scrollWheel]
             .map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min()!
         if mouseIdle < defaults.double(forKey: "mouseGrace"), pointerDisplay != d {
+            hold("mouse guard: mouse in use on \(pointerDisplay.map(screenName) ?? "?") (facing \(facing))")
             deb.candidate = nil
             return
         }
+        hold("facing \(facing)")
         guard let target = deb.feed(d, at: ProcessInfo.processInfo.systemUptime, dwell: defaults.double(forKey: "dwell")) else { return }
         focusFrontWindow(on: target)
         if defaults.bool(forKey: "movePointer"), let from = pointerDisplay, from != target {
@@ -1043,7 +1123,7 @@ func selftest() {
     let fwPeak = (0..<Int(fw.frameLength)).map { abs(fw.floatChannelData![0][$0]) }.max()!
     precondition(isSystemPath("/usr/libexec/historicalaudiod") && isSystemPath("/System/Library/PrivateFrameworks/X.framework/x"))
     precondition(!isSystemPath("/System/Applications/FaceTime.app/Contents/MacOS/FaceTime") && !isSystemPath("/Applications/zoom.us.app/x"))
-    precondition(fw.frameLength == 198450 && fwPeak > 0.3 && fwPeak <= 0.8) // normalized, no clipping
+    precondition(fw.frameLength == 198450 && fwPeak > 0.3 && fwPeak <= 0.801) // normalized to 0.8 (± float rounding), no clipping
     print("selftest ok")
 }
 

@@ -15,6 +15,12 @@ macOS menu bar app (Swift, AppKit + SwiftUI + Vision). Webcam head pose → whic
 
 ## Gotchas
 
+- **No Swift macros**: the Command Line Tools have no macro plugins. That rules out `@Generable` (Foundation Models)
+  and, since the macOS 27 SDK, SwiftUI's `@State`. Use `ObservableObject` + `@Published` (see `Live`) instead.
+- **FoundationModels is weak-linked** (`-weak_framework` in `build.sh`) so the app still launches on macOS 14–25;
+  every use sits behind `#available(macOS 26, *)`. "Why didn't it switch?" feeds the model a pre-counted
+  "most frequent reason" from `holds` (the ~3B model weighs raw evidence poorly) plus a reason → fix table.
+
 - **Signing decides whether permissions survive a rebuild.** `build.sh` signs with the self-signed
   "focusMonitor Self-Signed" identity from `make-cert.sh` (untrusted cert, still fine for codesign and TCC:
   designated requirement = bundle id + cert leaf hash). Without it, ad-hoc signing → new cdhash every build →
