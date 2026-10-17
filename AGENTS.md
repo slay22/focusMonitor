@@ -25,6 +25,9 @@ macOS menu bar app (Swift, AppKit + SwiftUI + Vision). Webcam head pose → whic
   "focusMonitor Self-Signed" identity from `make-cert.sh` (untrusted cert, still fine for codesign and TCC:
   designated requirement = bundle id + cert leaf hash). Without it, ad-hoc signing → new cdhash every build →
   Accessibility silently stops working until the user re-adds the app.
+  A macOS upgrade (seen on 26 → 27) can also leave a stale grant: switch shown on, app still prompts. Fix: remove
+  it with − in Accessibility (or `tccutil reset Accessibility local.focusMonitor`), relaunch, allow. Runs from a
+  terminal borrow the terminal's grant, so they can't reproduce this.
 - **Window activation uses private SkyLight `_SLPSSetFrontProcessWithOptions`** (like yabai/AltTab), loaded via `dlsym`.
   Public alternatives were tried and fail: `kAXFrontmostAttribute` brings *all* the app's windows forward (Cmd-Tab
   behavior), and `NSRunningApplication.activate()` is refused for background processes. `GetProcessForPID` is bound
