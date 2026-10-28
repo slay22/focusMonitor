@@ -220,6 +220,17 @@ func micInUseByOthers() -> Bool {
 
 /// macOS's own background processes (e.g. macOS 27's `historicalaudiod`, which keeps a mic open all the time,
 /// or Siri/dictation) aren't calls. Apps, including FaceTime in /System/Applications, are.
+let anyInput = CGEventType(rawValue: ~0)!  // kCGAnyInputEventType, what Teams' CalculateIdleTime reads
+
+/// Resets the "any input" idle clock without touching the keyDown/mouse clocks the guards read: a modifier change
+/// with no modifier held (checked: keyDown and mouseMoved idle times stay as they were). Needs Accessibility.
+func nudgeIdle() {
+    let e = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true)
+    e?.type = .flagsChanged
+    e?.flags = []
+    e?.post(tap: .cghidEventTap)
+}
+
 func isSystemDaemon(_ pid: pid_t) -> Bool {
     var buf = [CChar](repeating: 0, count: 4096)
     guard proc_pidpath(pid, &buf, UInt32(buf.count)) > 0 else { return false }
@@ -496,6 +507,7 @@ struct SettingsView: View {
     @AppStorage("pauseInCalls") var pauseInCalls = true
     @AppStorage("keepAwake") var keepAwake = true
     @AppStorage("awakeGrace") var awakeGrace = 0.0
+    @AppStorage("stayAvailable") var stayAvailable = true
     @AppStorage("glow") var glow = true
     @AppStorage("glowColor") var glowColor = ""
     @AppStorage("glowFade") var glowFade = 0.8
@@ -550,6 +562,7 @@ struct SettingsView: View {
                 Slider(value: $awakeGrace, in: 0...15, step: 1)
                 Text(awakeGrace == 0 ? "off" : "\(Int(awakeGrace)) min").monospacedDigit().frame(width: 44)
             }.disabled(!keepAwake)
+            Toggle("Keep me Available in Teams (and other chat apps) while I'm here", isOn: $stayAvailable)
             LabeledContent("Pause after typing for") {
                 Slider(value: $typingGrace, in: 0...5, step: 0.5)
                 Text(typingGrace == 0 ? "off" : String(format: "%.1f s", typingGrace)).monospacedDigit().frame(width: 44)
@@ -759,8 +772,13 @@ final class App: NSObject, NSApplicationDelegate {
             if self.tracker.wantsRunning && sinceFace > welcomeAfter { self.away = true }
             // Keep awake: a face counts as user activity, so display sleep, screen saver and lock wait while you're
             // there (reading, thinking). Once you leave, macOS's own timers run from the last face (+ grace).
-            if defaults.bool(forKey: "keepAwake") && self.tracker.wantsRunning && sinceFace < 10 + defaults.double(forKey: "awakeGrace") * 60 {
+            let here = self.tracker.wantsRunning && sinceFace < 10 + defaults.double(forKey: "awakeGrace") * 60
+            if defaults.bool(forKey: "keepAwake") && here {
                 IOPMAssertionDeclareUserActivity("focusMonitor: you're at the desk" as CFString, kIOPMUserActiveLocal, &self.awakeID)
+            }
+            // Teams (and other chat apps) go Away on "seconds since any input", which the line above doesn't touch.
+            if defaults.bool(forKey: "stayAvailable") && here && CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput) > 60 {
+                nudgeIdle()
             }
         }
     }
@@ -1128,7 +1146,7 @@ func selftest() {
 }
 
 if CommandLine.arguments.contains("selftest") { selftest(); exit(0) }
-defaults.register(defaults: ["dwell": 0.6, "typingGrace": 2.0, "enabled": true, "glow": true, "glowColor": "0.2 0.78 0.35 0.8", "glowFade": 0.8, "glowEffect": "Fade", "welcome": true, "welcomeSound": true, "keepAwake": true, "awakeGrace": 0.0,
+defaults.register(defaults: ["dwell": 0.6, "typingGrace": 2.0, "enabled": true, "glow": true, "glowColor": "0.2 0.78 0.35 0.8", "glowFade": 0.8, "glowEffect": "Fade", "welcome": true, "welcomeSound": true, "keepAwake": true, "awakeGrace": 0.0, "stayAvailable": true,
                                     "margin": 0.3, "mouseGrace": 1.0, "movePointer": false, "pauseInCalls": true])
 let delegate = App()
 NSApplication.shared.delegate = delegate

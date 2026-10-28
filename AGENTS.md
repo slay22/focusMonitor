@@ -42,12 +42,16 @@ macOS menu bar app (Swift, AppKit + SwiftUI + Vision). Webcam head pose → whic
 - Keep awake = `IOPMAssertionDeclareUserActivity` every 3 s while a face was seen recently (shows as `UserIsActive` in
   `pmset -g assertions`). It postpones display sleep/lock by the user's own timeout and does *not* reset
   `CGEventSource.secondsSinceLastEventType`, so the typing/mouse guards are unaffected (checked).
+- Stay Available: Teams' `CalculateIdleTime` reads `secondsSinceLastEventType(combinedSessionState, kCGAnyInputEventType)`
+  (seen in its disassembly). Any posted event resets *every* clock (hid state too, whatever the source), so
+  `nudgeIdle()` posts a `flagsChanged` with no flags: it resets "any input" but not the `keyDown`/mouse clocks the
+  guards read. Posting needs Accessibility.
 - Head pose, not eye gaze: `VNDetectFaceRectanglesRequest` revision 3 yaw/pitch, nearest calibrated anchor.
 - Profiles are keyed by the sorted set of connected `CGDirectDisplayID`s (stable per monitor: vendor/model/serial).
   `~/.focusmonitor.json` is `[setupKey: Profile]`. `loadProfiles()` still reads the old `[Anchor]` format.
 - Overlay windows (glow, calibration panel) must not be at window layer 0, or `focusFrontWindow` would pick them.
 - Settings live in `UserDefaults` (`local.focusMonitor`): `enabled`, `pauseInCalls`, `keepFocus` / `neverFocus` (comma-separated bundle IDs), `dwell`, `typingGrace`, `mouseGrace`, `margin`, `movePointer`, `camera`, `glow`,
-  `glowColor` ("r g b a" sRGB), `glowFade` (effect duration), `glowEffect` (one of `flashEffects`), `welcome`, `welcomeSound`, `keepAwake`, `awakeGrace` (minutes). Defaults are registered at the bottom of `focusMonitor.swift`.
+  `glowColor` ("r g b a" sRGB), `glowFade` (effect duration), `glowEffect` (one of `flashEffects`), `welcome`, `welcomeSound`, `keepAwake`, `awakeGrace` (minutes), `stayAvailable`. Defaults are registered at the bottom of `focusMonitor.swift`.
 
 ## Style
 

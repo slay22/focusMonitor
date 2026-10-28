@@ -38,6 +38,9 @@ editor on the right, and keep typing. No click or Cmd-Tab needed.
 - **Keep awake while you're here**: as long as the camera sees you, the screen doesn't dim, sleep or lock,
   even if you're just reading. Once you leave, macOS's normal sleep and lock timers take over (optional grace
   time). Replaces apps like Amphetamine for the "don't lock on me while I'm sitting here" case.
+- **Stay Available in Teams** while you're reading: chat apps go Away after a few minutes without input, so
+  while the camera sees you, a no-op modifier-key event resets that idle clock once a minute. Leave (or lock
+  the screen) and you go Away as usual.
 - **Launch at login**.
 - **"Why didn't it switch?"** (macOS 26+ with Apple Intelligence on): Apple's on-device model reads the recent
   decisions, settings and calibration and explains in plain words what held focus and what to change.
@@ -76,7 +79,7 @@ reads out which screen is next. Recalibrate from the menu whenever you move the 
 | Section | What's there |
 |---|---|
 | Status | Live **Facing** readout (screen, *between screens*, *looking away* + raw angles), Camera / Accessibility permission, Launch at login |
-| Tracking | Camera, switch delay, switch margin, mouse guard, pointer follows, pause during video calls, keep awake (+ grace after leaving), typing guard |
+| Tracking | Camera, switch delay, switch margin, mouse guard, pointer follows, pause during video calls, keep awake (+ grace after leaving), stay Available in Teams, typing guard |
 | Glow | On/off, effect, color (with opacity), duration, Preview, welcome-back fireworks (sound, Preview) |
 | Calibration | Current monitor setup, Recalibrate |
 | App rules | *Never switch away from* / *Never focus* lists |
