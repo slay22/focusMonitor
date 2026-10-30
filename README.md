@@ -76,15 +76,13 @@ reads out which screen is next. Recalibrate from the menu whenever you move the 
 
 **Settings**
 
-| Section | What's there |
+| Tab | What's there |
 |---|---|
-| Status | Live **Facing** readout (screen, *between screens*, *looking away* + raw angles), Camera / Accessibility permission, Launch at login |
-| Tracking | Camera, switch delay, switch margin, mouse guard, pointer follows, pause during video calls, keep awake (+ grace after leaving), stay Available in Teams, typing guard |
-| Glow | On/off, effect, color (with opacity), duration, Preview, welcome-back fireworks (sound, Preview) |
-| Calibration | Current monitor setup, Recalibrate |
-| App rules | *Never switch away from* / *Never focus* lists |
+| General | Live **Facing** readout (screen, *between screens*, *looking away* + raw angles), Camera / Accessibility permission, Launch at login, camera and Recalibrate, About |
+| Tracking | Switch delay, switch margin, pointer follows, typing and mouse guards, pause during video calls, app rules (*Never switch away from* / *Never focus*) |
+| Presence | Keep awake (+ grace after leaving), stay Available in Teams, welcome-back fireworks (sound, Preview) |
+| Flash | On/off, effect, color (with opacity), duration, Preview |
 | Log | "Why didn't it switch?" (Apple Intelligence), focus switches, status changes, calibration results, warnings |
-| About | Version, build commit, GitHub link |
 
 ## Tips
 

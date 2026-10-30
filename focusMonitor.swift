@@ -523,109 +523,146 @@ struct SettingsView: View {
     let onWhy: () async -> String
 
     var body: some View {
-        Form {
-            Section("Status") {
-                // Re-checked every half second: permissions change in System Settings, faces come and go.
-                TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
-                    LabeledContent("Facing") {
-                        Text(ctx.date.timeIntervalSince(live.seen) < 1 ? live.facing : "no face (or camera off)")
-                            .monospacedDigit()
+        TabView {
+            Form {
+                Section("Status") {
+                    // Re-checked every half second: permissions change in System Settings, faces come and go.
+                    TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
+                        LabeledContent("Facing") {
+                            Text(ctx.date.timeIntervalSince(live.seen) < 1 ? live.facing : "no face (or camera off)")
+                                .monospacedDigit()
+                        }
+                        permission("Camera", AVCaptureDevice.authorizationStatus(for: .video) == .authorized, pane: "Privacy_Camera")
+                        permission("Accessibility", AXIsProcessTrusted(), pane: "Privacy_Accessibility")
                     }
-                    permission("Camera", AVCaptureDevice.authorizationStatus(for: .video) == .authorized, pane: "Privacy_Camera")
-                    permission("Accessibility", AXIsProcessTrusted(), pane: "Privacy_Accessibility")
+                    Toggle("Launch at login", isOn: Binding(get: { SMAppService.mainApp.status == .enabled }, set: { on in
+                        do { try on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister() }
+                        catch { focusMonitor.log("Launch at login: \(error.localizedDescription)") }
+                        if SMAppService.mainApp.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+                    }))
                 }
-                Toggle("Launch at login", isOn: Binding(get: { SMAppService.mainApp.status == .enabled }, set: { on in
-                    do { try on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister() }
-                    catch { focusMonitor.log("Launch at login: \(error.localizedDescription)") }
-                    if SMAppService.mainApp.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
-                }))
-            }
-            Picker("Camera", selection: Binding(get: { camera }, set: { camera = $0; onCameraChange($0) })) {
-                ForEach(HeadTracker.cameras, id: \.uniqueID) { Text($0.localizedName).tag($0.uniqueID) }
-            }
-            LabeledContent("Switch after looking for") {
-                Slider(value: $dwell, in: 0.2...2, step: 0.1)
-                Text(String(format: "%.1f s", dwell)).monospacedDigit().frame(width: 44)
-            }
-            LabeledContent("Switch margin") {
-                Slider(value: $margin, in: 0...0.6, step: 0.05)
-                Text("\(Int(margin * 100)) %").monospacedDigit().frame(width: 44)
-            }
-            LabeledContent("Keep focus while using the mouse for") {
-                Slider(value: $mouseGrace, in: 0...5, step: 0.5)
-                Text(mouseGrace == 0 ? "off" : String(format: "%.1f s", mouseGrace)).monospacedDigit().frame(width: 44)
-            }
-            Toggle("Move the mouse pointer to the focused screen", isOn: $movePointer)
-            Toggle("Pause during calls (another app uses the microphone or a camera)", isOn: $pauseInCalls)
-            Toggle("Keep the Mac awake while I'm at the desk", isOn: $keepAwake)
-            LabeledContent("…and after I leave for") {
-                Slider(value: $awakeGrace, in: 0...15, step: 1)
-                Text(awakeGrace == 0 ? "off" : "\(Int(awakeGrace)) min").monospacedDigit().frame(width: 44)
-            }.disabled(!keepAwake)
-            Toggle("Keep me Available in Teams (and other chat apps) while I'm here", isOn: $stayAvailable)
-            LabeledContent("Pause after typing for") {
-                Slider(value: $typingGrace, in: 0...5, step: 0.5)
-                Text(typingGrace == 0 ? "off" : String(format: "%.1f s", typingGrace)).monospacedDigit().frame(width: 44)
-            }
-            Toggle("Flash the screen that gets focus", isOn: $glow)
-            Group {
-                Picker("Flash effect", selection: $glowEffect) { ForEach(flashEffects, id: \.self) { Text($0) } }
-                ColorPicker("Flash color", selection: Binding(get: { color(from: glowColor) }, set: { glowColor = string(from: $0) }))
-                LabeledContent("Effect duration") {
-                    Slider(value: $glowFade, in: 0.2...3, step: 0.1)
-                    Text(String(format: "%.1f s", glowFade)).monospacedDigit().frame(width: 44)
+                Section("Calibration") {
+                    Picker("Camera", selection: Binding(get: { camera }, set: { camera = $0; onCameraChange($0) })) {
+                        ForEach(HeadTracker.cameras, id: \.uniqueID) { Text($0.localizedName).tag($0.uniqueID) }
+                    }
+                    LabeledContent("Screens") {
+                        Text(screens().map(\.screen.localizedName).joined(separator: " + ")).foregroundStyle(.secondary)
+                    }
+                    LabeledContent("") { Button("Recalibrate…", action: onRecalibrate) }
                 }
-                LabeledContent("") { Button("Preview", action: onPreviewGlow) }
-            }.disabled(!glow)
-            Toggle("Welcome me back with fireworks (after 3+ min away)", isOn: $welcome)
-            Group {
-                Toggle("With sound", isOn: $welcomeSound)
-                LabeledContent("") { Button("Preview", action: onPreviewWelcome) }
-            }.disabled(!welcome)
-            LabeledContent("Calibration") {
-                Text(screens().map(\.screen.localizedName).joined(separator: " + ")).foregroundStyle(.secondary)
-                Button("Recalibrate…", action: onRecalibrate)
+                Section("About") {
+                    HStack(spacing: 14) {
+                        Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 56, height: 56)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("focusMonitor").font(.headline)
+                            Text("Look at a monitor, and its front window gets focus.").foregroundStyle(.secondary)
+                            let info = Bundle.main.infoDictionary ?? [:]
+                            Text("Version \(info["CFBundleShortVersionString"] as? String ?? "?") (\(info["CFBundleVersion"] as? String ?? "?"))")
+                                .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            Link("github.com/slay22/focusMonitor", destination: URL(string: "https://github.com/slay22/focusMonitor")!)
+                                .font(.caption)
+                        }
+                    }
+                }
             }
-            Section("App rules") {
-                AppList("Never switch away from", key: "keepFocus")
-                AppList("Never focus", key: "neverFocus")
+            .formStyle(.grouped)
+            .tabItem { Label("General", systemImage: "gearshape") }
+
+            Form {
+                Section("Switching") {
+                    LabeledContent("Switch after looking for") {
+                        Slider(value: $dwell, in: 0.2...2, step: 0.1)
+                        Text(String(format: "%.1f s", dwell)).monospacedDigit().frame(width: 44)
+                    }
+                    LabeledContent("Switch margin") {
+                        Slider(value: $margin, in: 0...0.6, step: 0.05)
+                        Text("\(Int(margin * 100)) %").monospacedDigit().frame(width: 44)
+                    }
+                    Toggle("Move the mouse pointer to the focused screen", isOn: $movePointer)
+                }
+                Section("Hold focus") {
+                    LabeledContent("After typing for") {
+                        Slider(value: $typingGrace, in: 0...5, step: 0.5)
+                        Text(typingGrace == 0 ? "off" : String(format: "%.1f s", typingGrace)).monospacedDigit().frame(width: 44)
+                    }
+                    LabeledContent("While using the mouse for") {
+                        Slider(value: $mouseGrace, in: 0...5, step: 0.5)
+                        Text(mouseGrace == 0 ? "off" : String(format: "%.1f s", mouseGrace)).monospacedDigit().frame(width: 44)
+                    }
+                    Toggle("Pause during calls (another app uses the microphone or a camera)", isOn: $pauseInCalls)
+                }
+                Section("App rules") {
+                    AppList("Never switch away from", key: "keepFocus")
+                    AppList("Never focus", key: "neverFocus")
+                }
             }
-            Section("Log") {
+            .formStyle(.grouped)
+            .tabItem { Label("Tracking", systemImage: "eye") }
+
+            Form {
+                Section("While I'm at the desk") {
+                    Toggle("Keep the Mac awake", isOn: $keepAwake)
+                    LabeledContent("…and after I leave for") {
+                        Slider(value: $awakeGrace, in: 0...15, step: 1)
+                        Text(awakeGrace == 0 ? "off" : "\(Int(awakeGrace)) min").monospacedDigit().frame(width: 44)
+                    }.disabled(!keepAwake)
+                    Toggle("Keep me Available in Teams (and other chat apps)", isOn: $stayAvailable)
+                }
+                Section("Welcome back") {
+                    Toggle("Fireworks when I'm back (after 3+ min away)", isOn: $welcome)
+                    Group {
+                        Toggle("With sound", isOn: $welcomeSound)
+                        LabeledContent("") { Button("Preview", action: onPreviewWelcome) }
+                    }.disabled(!welcome)
+                }
+            }
+            .formStyle(.grouped)
+            .tabItem { Label("Presence", systemImage: "person.crop.circle") }
+
+            Form {
+                Section {
+                    Toggle("Flash the screen that gets focus", isOn: $glow)
+                    Group {
+                        Picker("Effect", selection: $glowEffect) { ForEach(flashEffects, id: \.self) { Text($0) } }
+                        ColorPicker("Color", selection: Binding(get: { color(from: glowColor) }, set: { glowColor = string(from: $0) }))
+                        LabeledContent("Duration") {
+                            Slider(value: $glowFade, in: 0.2...3, step: 0.1)
+                            Text(String(format: "%.1f s", glowFade)).monospacedDigit().frame(width: 44)
+                        }
+                        LabeledContent("") { Button("Preview", action: onPreviewGlow) }
+                    }.disabled(!glow)
+                }
+            }
+            .formStyle(.grouped)
+            .tabItem { Label("Flash", systemImage: "sparkles") }
+
+            Form {
                 if #available(macOS 26, *), SystemLanguageModel.default.isAvailable {
-                    HStack {
-                        Button(live.asking ? "Thinking…" : "Why didn't it switch?") {
-                            live.asking = true
-                            Task { live.why = await onWhy(); live.asking = false }
-                        }.disabled(live.asking)
-                        Text("Apple Intelligence, on-device").font(.caption).foregroundStyle(.secondary)
-                    }
-                    if !live.why.isEmpty { Text(live.why).textSelection(.enabled) }
-                }
-                ScrollView {
-                    Text(log.lines.joined(separator: "\n"))
-                        .font(.caption.monospaced())
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(height: 220) // fixed, so the log scrolls inside its box instead of stretching the Form
-            }
-            Section("About") {
-                HStack(spacing: 14) {
-                    Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 56, height: 56)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("focusMonitor").font(.headline)
-                        Text("Look at a monitor, and its front window gets focus.").foregroundStyle(.secondary)
-                        let info = Bundle.main.infoDictionary ?? [:]
-                        Text("Version \(info["CFBundleShortVersionString"] as? String ?? "?") (\(info["CFBundleVersion"] as? String ?? "?"))")
-                            .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                        Link("github.com/slay22/focusMonitor", destination: URL(string: "https://github.com/slay22/focusMonitor")!)
-                            .font(.caption)
+                    Section {
+                        HStack {
+                            Button(live.asking ? "Thinking…" : "Why didn't it switch?") {
+                                live.asking = true
+                                Task { live.why = await onWhy(); live.asking = false }
+                            }.disabled(live.asking)
+                            Text("Apple Intelligence, on-device").font(.caption).foregroundStyle(.secondary)
+                        }
+                        if !live.why.isEmpty { Text(live.why).textSelection(.enabled) }
                     }
                 }
+                Section {
+                    ScrollView {
+                        Text(log.lines.joined(separator: "\n"))
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(height: 340) // fixed, so the log scrolls inside its box instead of stretching the Form
+                }
             }
+            .formStyle(.grouped)
+            .tabItem { Label("Log", systemImage: "list.bullet.rectangle") }
         }
-        .formStyle(.grouped)
-        .frame(minWidth: 500, minHeight: 720) // grouped Form has no natural height
+        .frame(width: 560, height: 560) // fixed: tabs of different heights would otherwise resize the window
     }
 
     func permission(_ name: String, _ granted: Bool, pane: String) -> some View {
